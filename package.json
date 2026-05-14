@@ -1,0 +1,21 @@
+{
+  "name": "graphql-analytics",
+  "version": "1.0.0",
+  "description": "Lightweight, self-hostable analytics tool for GraphQL APIs",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "dev": "concurrently \"npm run dev --workspace=packages/sdk\" \"npm run dev --workspace=packages/collector\" \"npm run dev --workspace=apps/dashboard\"",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.5.3"
+  }
+}

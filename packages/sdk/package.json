@@ -1,0 +1,49 @@
+{
+  "name": "@graphql-analytics/sdk",
+  "version": "1.0.0",
+  "description": "SDK for integrating GraphQL Analytics with Apollo Server and GraphQL Yoga",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./apollo": {
+      "import": "./dist/plugin.mjs",
+      "require": "./dist/plugin.js"
+    },
+    "./yoga": {
+      "import": "./dist/yoga.mjs",
+      "require": "./dist/yoga.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "protobufjs": "^7.2.5"
+  },
+  "peerDependencies": {
+    "graphql": "^15.0.0 || ^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "@vitest/ui": "^1.0.4",
+    "graphql": "^16.8.1",
+    "typescript": "^5.5.3",
+    "vitest": "^1.6.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "graphql",
+    "analytics",
+    "monitoring",
+    "apollo-server",
+    "graphql-yoga"
+  ]
+}
