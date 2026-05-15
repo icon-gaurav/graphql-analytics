@@ -97,9 +97,6 @@ async function startServer() {
 
   console.log(`✓ Test server ready at ${url}`);
   console.log(`✓ OpenTelemetry enabled: sending traces/metrics to ${process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318'}`);
-  console.log(`\n📊 Observability dashboards:`);
-  console.log(`  - Jaeger UI (traces): http://localhost:16686`);
-  console.log(`  - Prometheus (metrics): http://localhost:9090`);
   console.log(`\n📝 Sample queries:\n`);
   console.log(`  # Get user with posts`);
   console.log(`  query { user(id: "1") { id name email posts { id title } } }\n`);
