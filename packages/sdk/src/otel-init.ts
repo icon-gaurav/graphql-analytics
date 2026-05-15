@@ -24,7 +24,7 @@ export function initializeOTel(
 
   const {
     serviceName = 'graphql-analytics-sdk',
-    collectorUrl = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://localhost:4318',
+    collectorUrl = process.env['GRAPHQL_ANALYTICS_COLLECTOR_URL'] ?? 'http://localhost:4318',
     metricsIntervalMs = 30000,
     enabled = true,
   } = config;

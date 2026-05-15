@@ -84,9 +84,9 @@ async function startServer() {
     plugins: [
       GraphQLAnalyticsPlugin({
         serviceName: 'test-graphql-server',
-        collectorUrl: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318',
-        metricsIntervalMs: parseInt(process.env.OTEL_METRICS_INTERVAL || '30000'),
-        enabled: process.env.OTEL_ENABLED !== 'false',
+        collectorUrl: process.env.GRAPHQL_ANALYTICS_COLLECTOR_URL || 'http://localhost:4318',
+        metricsIntervalMs: parseInt(process.env.GRAPHQL_ANALYTICS_METRICS_INTERVAL || '30000'),
+        enabled: process.env.GRAPHQL_ANALYTICS_ENABLED !== 'false',
       }),
     ],
   });
@@ -96,7 +96,7 @@ async function startServer() {
   });
 
   console.log(`✓ Test server ready at ${url}`);
-  console.log(`✓ OpenTelemetry enabled: sending traces/metrics to ${process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318'}`);
+  console.log(`✓ OpenTelemetry enabled: sending traces/metrics to ${process.env.GRAPHQL_ANALYTICS_COLLECTOR_URL || 'http://localhost:4318'}`);
   console.log(`\n📝 Sample queries:\n`);
   console.log(`  # Get user with posts`);
   console.log(`  query { user(id: "1") { id name email posts { id title } } }\n`);
