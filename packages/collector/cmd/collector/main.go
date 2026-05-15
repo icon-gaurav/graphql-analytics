@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/graphql-analytics/collector/internal/aggregator"
 	"github.com/graphql-analytics/collector/internal/intake"
@@ -17,6 +19,14 @@ func main() {
 	collectorPort := os.Getenv("COLLECTOR_PORT")
 	if collectorPort == "" {
 		collectorPort = "9000"
+	}
+	otlpHTTPPort := os.Getenv("OTLP_HTTP_PORT")
+	if otlpHTTPPort == "" {
+		otlpHTTPPort = "4318" // OTLP HTTP — SDK sends directly here
+	}
+	otlpEnabled := os.Getenv("OTLP_ENABLED")
+	if otlpEnabled == "" {
+		otlpEnabled = "true"
 	}
 
 	dbWriteURL := os.Getenv("DB_WRITE_URL")
@@ -30,6 +40,16 @@ func main() {
 		log.Fatalf("Failed to start UDP listener: %v", err)
 	}
 	log.Printf("✓ UDP listener started on port %s", collectorPort)
+
+	var otlpServer *http.Server
+	if otlpEnabled == "true" {
+		startedServer, err := intake.StartOTLPHTTPListener(otlpHTTPPort, eventChan)
+		if err != nil {
+			log.Fatalf("Failed to start OTLP HTTP listener: %v", err)
+		}
+		otlpServer = startedServer
+		log.Printf("✓ OTLP HTTP listener started on port %s", otlpHTTPPort)
+	}
 
 	// Start aggregator
 	stopAggregator := aggregator.Start(eventChan, dbWriteURL)
@@ -52,6 +72,13 @@ func main() {
 
 	stopAggregator()
 	udpListener.Close()
+	if otlpServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otlpServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("OTLP server shutdown error: %v", err)
+		}
+	}
 
 	fmt.Println("✓ Collector shut down gracefully")
 }

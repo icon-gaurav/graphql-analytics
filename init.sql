@@ -25,8 +25,15 @@ CREATE TABLE IF NOT EXISTS operations (
   operation_type TEXT,
   duration_ms    FLOAT,
   has_errors     BOOLEAN,
-  client_name    TEXT
+  client_name    TEXT,
+  query_depth    INTEGER DEFAULT 0,
+  field_count    INTEGER DEFAULT 0,
+  complexity_score INTEGER DEFAULT 0
 );
+
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS query_depth INTEGER DEFAULT 0;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS field_count INTEGER DEFAULT 0;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS complexity_score INTEGER DEFAULT 0;
 
 SELECT create_hypertable('operations', 'time', if_not_exists => TRUE);
 SELECT add_retention_policy('operations', INTERVAL '7 days', if_not_exists => TRUE);
@@ -50,6 +57,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_field_usage_unique
 -- Resolver timings (aggregated per minute)
 CREATE TABLE IF NOT EXISTS resolver_timings (
   time           TIMESTAMPTZ NOT NULL,
+  operation_name TEXT NOT NULL DEFAULT '',
   field_path     TEXT NOT NULL,
   p50_ms         FLOAT,
   p95_ms         FLOAT,
@@ -57,12 +65,21 @@ CREATE TABLE IF NOT EXISTS resolver_timings (
   call_count     BIGINT
 );
 
+ALTER TABLE resolver_timings ADD COLUMN IF NOT EXISTS operation_name TEXT NOT NULL DEFAULT '';
+
 SELECT create_hypertable('resolver_timings', 'time', if_not_exists => TRUE);
 SELECT add_retention_policy('resolver_timings', INTERVAL '90 days', if_not_exists => TRUE);
 
 -- Add unique index for resolver timings
+DROP INDEX IF EXISTS idx_resolver_timings_unique;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_resolver_timings_unique
-  ON resolver_timings (time, field_path);
+  ON resolver_timings (time, operation_name, field_path);
+
+CREATE INDEX IF NOT EXISTS idx_operations_name_time
+  ON operations (operation_name, time DESC);
+
+CREATE INDEX IF NOT EXISTS idx_operations_client_time
+  ON operations (client_name, time DESC);
 
 -- Continuous aggregate: hourly field usage rollup
 CREATE MATERIALIZED VIEW IF NOT EXISTS field_usage_hourly

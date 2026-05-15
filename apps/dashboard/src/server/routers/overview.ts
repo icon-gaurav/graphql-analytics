@@ -6,6 +6,8 @@ interface StatRow { total_calls: string; total_errors: string }
 interface SlowRow { field_path: string; avg_p99: string }
 interface TopFieldRow { type_name: string; field_name: string; total_calls: string }
 interface VolumeRow { hour: string; call_count: string }
+interface ClientRow { client_name: string | null; call_count: string; error_count: string }
+interface LastSeenRow { last_seen_at: Date | null }
 
 const overviewRouter = router({
   hourlyVolume: publicProcedure.query(async () => {
@@ -16,8 +18,8 @@ const overviewRouter = router({
     const result = await db<VolumeRow[]>`
       SELECT 
         DATE_TRUNC('hour', time) as hour,
-        SUM(call_count) as call_count
-      FROM field_usage
+        COUNT(*) as call_count
+      FROM operations
       WHERE time >= ${oneDayAgo}
       GROUP BY hour
       ORDER BY hour ASC
@@ -51,16 +53,18 @@ const overviewRouter = router({
       errorRateResult,
       slowestResult,
       topFieldsResult,
+      topClientsResult,
+      lastSeenResult,
     ] = await Promise.all([
       db<CountRow[]>`
-        SELECT COUNT(*) as count FROM field_usage 
+        SELECT COUNT(*) as count FROM operations
         WHERE time >= ${oneDayAgo}
       `,
       db<StatRow[]>`
         SELECT 
-          SUM(call_count) as total_calls,
-          SUM(error_count) as total_errors
-        FROM field_usage 
+          COUNT(*) as total_calls,
+          COUNT(*) FILTER (WHERE has_errors) as total_errors
+        FROM operations
         WHERE time >= ${oneDayAgo}
       `,
       db<SlowRow[]>`
@@ -79,6 +83,18 @@ const overviewRouter = router({
         ORDER BY total_calls DESC
         LIMIT 5
       `,
+      db<ClientRow[]>`
+        SELECT client_name, COUNT(*) as call_count, COUNT(*) FILTER (WHERE has_errors) as error_count
+        FROM operations
+        WHERE time >= ${oneDayAgo}
+        GROUP BY client_name
+        ORDER BY call_count DESC
+        LIMIT 5
+      `,
+      db<LastSeenRow[]>`
+        SELECT MAX(time) as last_seen_at
+        FROM operations
+      `,
     ]);
 
     const totalCalls = Number(errorRateResult[0]?.total_calls || 0);
@@ -96,7 +112,12 @@ const overviewRouter = router({
         fieldName: row.field_name,
         callCount: Number(row.total_calls || 0),
       })),
-      lastSeenAt: new Date(),
+      topClients: topClientsResult.map((row) => ({
+        clientName: row.client_name || 'Unknown client',
+        callCount: Number(row.call_count || 0),
+        errorCount: Number(row.error_count || 0),
+      })),
+      lastSeenAt: lastSeenResult[0]?.last_seen_at ?? null,
     };
   }),
 });

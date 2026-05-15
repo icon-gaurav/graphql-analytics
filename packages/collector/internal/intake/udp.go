@@ -5,7 +5,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"sync"
 	"sync/atomic"
 )
 
@@ -19,6 +18,9 @@ type OperationEvent struct {
 	ClientName      *string          `json:"clientName"`
 	Timestamp       int64            `json:"timestamp"`
 	HasErrors       bool             `json:"hasErrors"`
+	QueryDepth      int              `json:"queryDepth"`
+	FieldCount      int              `json:"fieldCount"`
+	ComplexityScore int              `json:"complexityScore"`
 }
 
 type FieldUsage struct {
@@ -35,7 +37,6 @@ var (
 	eventsReceived  atomic.Int64
 	eventsDropped   atomic.Int64
 	flushErrors     atomic.Int64
-	metricsLock     sync.Mutex
 )
 
 // StartUDPListener starts listening on UDP port and returns the listener and event channel
@@ -71,15 +72,8 @@ func StartUDPListener(port string) (*net.UDPConn, chan OperationEvent, error) {
 				continue
 			}
 
-			// Push to channel
 			for _, event := range events {
-				select {
-				case eventChan <- event:
-					eventsReceived.Add(1)
-				default:
-					// Channel full, drop event
-					eventsDropped.Add(1)
-				}
+				enqueueEvent(eventChan, event)
 			}
 		}
 	}()
@@ -89,9 +83,6 @@ func StartUDPListener(port string) (*net.UDPConn, chan OperationEvent, error) {
 
 // MetricsHandler serves Prometheus metrics
 func MetricsHandler(w http.ResponseWriter, r *http.Request) {
-	metricsLock.Lock()
-	defer metricsLock.Unlock()
-
 	metrics := map[string]int64{
 		"events_received": eventsReceived.Load(),
 		"events_dropped":  eventsDropped.Load(),
@@ -105,6 +96,16 @@ func MetricsHandler(w http.ResponseWriter, r *http.Request) {
 // IncrementFlushErrors increments the flush error counter
 func IncrementFlushErrors() {
 	flushErrors.Add(1)
+}
+
+func enqueueEvent(eventChan chan OperationEvent, event OperationEvent) {
+	select {
+	case eventChan <- event:
+		eventsReceived.Add(1)
+	default:
+		// Channel full, drop event.
+		eventsDropped.Add(1)
+	}
 }
 
 

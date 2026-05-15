@@ -62,6 +62,8 @@ export default function FieldsPage() {
             <Link href="/" className="dash-nav-link">Overview</Link>
             <Link href="/fields" className="dash-nav-link dash-nav-link-active">Fields</Link>
             <Link href="/operations" className="dash-nav-link">Operations</Link>
+            <Link href="/schema" className="dash-nav-link">Schema</Link>
+            <Link href="/security" className="dash-nav-link">Security</Link>
           </nav>
 
           <div className="dash-topbar-right">

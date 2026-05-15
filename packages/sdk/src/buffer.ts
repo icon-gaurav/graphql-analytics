@@ -13,6 +13,9 @@ export interface BufferEvent {
   clientName?: string;
   timestamp: number;
   hasErrors: boolean;
+  queryDepth: number;
+  fieldCount: number;
+  complexityScore: number;
 }
 
 export interface FieldUsage {

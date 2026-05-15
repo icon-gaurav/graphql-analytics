@@ -10,7 +10,8 @@ interface SummaryData {
   errorRate: number;
   slowestResolvers: Array<{ fieldPath: string; avgP99Ms: number }>;
   topFields: Array<{ typeName: string; fieldName: string; callCount: number }>;
-  lastSeenAt: string;
+  topClients: Array<{ clientName: string; callCount: number; errorCount: number }>;
+  lastSeenAt: string | null;
 }
 
 const HOUR_LABELS = Array.from({ length: 24 }, (_, i) => {
@@ -98,6 +99,14 @@ export default function OverviewPage() {
     return Math.max(...data.slowestResolvers.map((r) => r.avgP99Ms), 1);
   }, [data]);
 
+  const formattedLastSeen = useMemo(() => {
+    if (!data?.lastSeenAt) {
+      return 'No events yet';
+    }
+
+    return new Date(data.lastSeenAt).toLocaleString();
+  }, [data?.lastSeenAt]);
+
   return (
     <div className="dash-page">
       <header className="dash-topbar">
@@ -113,12 +122,14 @@ export default function OverviewPage() {
             <Link href="/" className="dash-nav-link dash-nav-link-active">Overview</Link>
             <Link href="/fields" className="dash-nav-link">Fields</Link>
             <Link href="/operations" className="dash-nav-link">Operations</Link>
+            <Link href="/schema" className="dash-nav-link">Schema</Link>
+            <Link href="/security" className="dash-nav-link">Security</Link>
           </nav>
 
           <div className="dash-topbar-right">
             <span className="live-dot" aria-hidden="true" />
             <span className="dash-live-label">Live</span>
-            <span className="dash-updated">Last updated: just now</span>
+            <span className="dash-updated">Last seen: {formattedLastSeen}</span>
           </div>
         </div>
       </header>
@@ -270,6 +281,72 @@ export default function OverviewPage() {
                       </div>
                     );
                   })}
+                </div>
+              </article>
+            </section>
+
+            <section className="dash-grid-2">
+              <article className="dash-card table-card">
+                <div className="table-head">
+                  <p><i className="ti ti-devices" /> Top Clients</p>
+                  <span className="p99-badge">24h</span>
+                </div>
+                <div className="table-body">
+                  {data.topClients.length > 0 ? data.topClients.map((client, idx) => {
+                    const errorRate = client.callCount > 0 ? (client.errorCount / client.callCount) * 100 : 0;
+                    return (
+                      <div className="table-row" key={`${client.clientName}.${idx}`}>
+                        <div className="row-name mono">
+                          <span>{client.clientName}</span>
+                        </div>
+                        <div className="row-metric">
+                          <span className="mono">{client.callCount}</span>
+                          <span className="mono" style={{ color: errorRate > 5 ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                            {errorRate.toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }) : (
+                    <div className="table-row">
+                      <div className="row-name">
+                        <span>No client metadata captured yet.</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </article>
+
+              <article className="dash-card table-card">
+                <div className="table-head">
+                  <p><i className="ti ti-pulse" /> Pipeline Freshness</p>
+                  <span className="p99-badge">live</span>
+                </div>
+                <div className="table-body">
+                  <div className="table-row">
+                    <div className="row-name">
+                      <span>Most recent event</span>
+                    </div>
+                    <div className="row-metric">
+                      <span className="mono">{formattedLastSeen}</span>
+                    </div>
+                  </div>
+                  <div className="table-row">
+                    <div className="row-name">
+                      <span>Tracked clients</span>
+                    </div>
+                    <div className="row-metric">
+                      <span className="mono">{data.topClients.length}</span>
+                    </div>
+                  </div>
+                  <div className="table-row">
+                    <div className="row-name">
+                      <span>Request points</span>
+                    </div>
+                    <div className="row-metric">
+                      <span className="mono">{chartData.length}</span>
+                    </div>
+                  </div>
                 </div>
               </article>
             </section>

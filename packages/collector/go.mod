@@ -4,6 +4,7 @@ go 1.22
 
 require (
 	github.com/jackc/pgx/v5 v5.5.0
+	go.opentelemetry.io/proto/otlp v1.3.1
 	google.golang.org/protobuf v1.31.0
 )
 

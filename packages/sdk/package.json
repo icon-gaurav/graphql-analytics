@@ -24,7 +24,12 @@
     "test": "vitest"
   },
   "dependencies": {
-    "protobufjs": "^7.2.5"
+    "@opentelemetry/api": "latest",
+    "@opentelemetry/sdk-trace-node": "latest",
+    "@opentelemetry/sdk-metrics": "latest",
+    "@opentelemetry/exporter-trace-otlp-http": "latest",
+    "@opentelemetry/exporter-metrics-otlp-http": "latest",
+    "@opentelemetry/semantic-conventions": "latest"
   },
   "peerDependencies": {
     "graphql": "^15.0.0 || ^16.0.0"

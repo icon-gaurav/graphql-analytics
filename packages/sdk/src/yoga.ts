@@ -1,100 +1,236 @@
-import { RingBuffer, BufferEvent, FieldUsage } from './buffer';
+import type { DocumentNode, GraphQLResolveInfo, OperationDefinitionNode } from 'graphql';
+import { RingBuffer, type BufferEvent } from './buffer';
+import { initializeOTel, type OTelConfig, shutdownOTel } from './otel-init';
+import {
+  createOperationMetrics,
+  initializeMetrics,
+  recordFieldMetrics,
+  recordOperationMetrics,
+} from './otel-metrics';
+import { createFieldSpan, createOperationSpan, finishSpan, initializeTracing } from './otel-tracing';
+import { collectQueryMetrics } from './query-metrics';
 import { UDPTransport } from './transport';
 
-export interface GraphQLAnalyticsYogaOptions {
-  host?: string;
-  port?: number;
-  bufferCapacity?: number;
-  bufferFlushIntervalMs?: number;
-  bufferFlushThreshold?: number;
+type OperationType = 'query' | 'mutation' | 'subscription';
+
+interface YogaExecuteArgs {
+  operationName?: string | null;
+  document?: DocumentNode;
+  contextValue?: {
+    request?: {
+      headers?: {
+        get(name: string): string | null;
+      };
+    };
+  };
 }
 
-export function useGraphQLAnalytics(
-  options: GraphQLAnalyticsYogaOptions = {}
-) {
-  const host = options.host ?? 'localhost';
-  const port = options.port ?? 9000;
+export interface GraphQLAnalyticsYogaOptions extends OTelConfig {
+  host?: string;
+  port?: number;
+  batchSize?: number;
+  enableUdpFallback?: boolean;
+  bufferCapacity?: number;
+  flushIntervalMs?: number;
+  flushThreshold?: number;
+}
 
-  const transport = new UDPTransport({ host, port });
-  const buffer = new RingBuffer({
-    capacity: options.bufferCapacity,
-    flushIntervalMs: options.bufferFlushIntervalMs,
-    flushThreshold: options.bufferFlushThreshold,
-    onFlush: async (events) => {
-      transport.send(events);
-    },
-  });
+interface TelemetryRuntime {
+  operationMetrics: ReturnType<typeof createOperationMetrics>;
+  udpTransport: UDPTransport | null;
+  udpBuffer: RingBuffer | null;
+}
+
+let runtime: TelemetryRuntime | null = null;
+
+function initializeRuntime(options: GraphQLAnalyticsYogaOptions): TelemetryRuntime {
+  if (runtime) {
+    return runtime;
+  }
+
+  initializeOTel(options);
+  initializeTracing({ tracerName: 'graphql-yoga', tracerVersion: '1.0.0' });
+  initializeMetrics({ meterName: 'graphql-yoga', meterVersion: '1.0.0' });
+
+  let udpTransport: UDPTransport | null = null;
+  let udpBuffer: RingBuffer | null = null;
+  const shouldEnableUdp = options.enableUdpFallback ?? Boolean(options.host && options.port);
+
+  if (shouldEnableUdp && options.host && options.port) {
+    udpTransport = new UDPTransport({
+      host: options.host,
+      port: options.port,
+      batchSize: options.batchSize,
+    });
+
+    udpBuffer = new RingBuffer({
+      capacity: options.bufferCapacity,
+      flushIntervalMs: options.flushIntervalMs,
+      flushThreshold: options.flushThreshold,
+      onFlush: (events) => {
+        udpTransport?.send(events);
+      },
+    });
+  }
+
+  runtime = {
+    operationMetrics: createOperationMetrics(),
+    udpTransport,
+    udpBuffer,
+  };
+
+  return runtime;
+}
+
+function inferOperationType(document: DocumentNode | undefined, operationName: string | null): OperationType {
+  const definitions = document?.definitions;
+  if (definitions?.length) {
+    const operations = definitions.filter(
+      (definition): definition is OperationDefinitionNode => definition.kind === 'OperationDefinition'
+    );
+    const selected = operations.find((operation) => operation.name?.value === operationName) ?? operations[0];
+    if (selected?.operation) {
+      return selected.operation;
+    }
+  }
+
+  return 'query';
+}
+
+function resolverPath(info: GraphQLResolveInfo): string {
+  const segments: string[] = [];
+  let current: GraphQLResolveInfo['path'] | undefined = info.path;
+
+  while (current) {
+    if (typeof current.key === 'string') {
+      segments.push(current.key);
+    }
+    current = current.prev ?? undefined;
+  }
+
+  segments.reverse();
+  return segments.length ? segments.join('.') : `${info.parentType.name}.${info.fieldName}`;
+}
+
+function extractMessage(error: unknown): string | undefined {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return undefined;
+}
+
+export function useGraphQLAnalytics(options: GraphQLAnalyticsYogaOptions = {}) {
+  const telemetry = initializeRuntime(options);
 
   return {
-    onExecute({ args }: any) {
+    onExecute(payload: { args: YogaExecuteArgs }) {
+      const args = payload.args;
       const startTime = Date.now();
-      const operationName: string | null =
-        args.operationName ?? null;
-      let operationType: BufferEvent['operationType'] = 'query';
+      const operationName = args.operationName ?? null;
+      const operationType = inferOperationType(args.document, operationName);
+      const queryMetrics = collectQueryMetrics(args.document, operationName);
+      const clientName = args.contextValue?.request?.headers?.get('x-graphql-client-name') ?? undefined;
 
-      if (args.document?.definitions?.[0]?.operation) {
-        operationType = args.document.definitions[0].operation;
-      }
+      const rootSpan = createOperationSpan(operationName, operationType, {
+        clientName,
+        queryDepth: queryMetrics.queryDepth,
+        fieldCount: queryMetrics.fieldCount,
+        complexityScore: queryMetrics.complexityScore,
+      });
+
+      const fieldUsage = new Map<string, { typeName: string; fieldName: string }>();
+      const resolverTimings: BufferEvent['resolverTimings'] = [];
 
       return {
-        onExecuteDone({ result }: any) {
-          try {
-            const durationMs = Date.now() - startTime;
-            const hasErrors = (result.errors?.length ?? 0) > 0;
+        onResolverCalled(resolverPayload: { info?: GraphQLResolveInfo }) {
+          const info = resolverPayload.info;
+          if (!info) {
+            return undefined;
+          }
 
-            const fields = new Set<string>();
-            if (result.data && typeof result.data === 'object') {
-              collectFields(result.data, '', fields);
-            }
+          const startedAt = Date.now();
+          const path = resolverPath(info);
+          const span = createFieldSpan(path, rootSpan);
+          const fieldKey = `${info.parentType.name}.${info.fieldName}`;
+          fieldUsage.set(fieldKey, {
+            typeName: info.parentType.name,
+            fieldName: info.fieldName,
+          });
 
-            const fieldUsages: FieldUsage[] = Array.from(fields).map((fp) => {
-              const parts = fp.split('.');
-              return {
-                typeName: parts[0] ?? 'Unknown',
-                fieldName: parts[parts.length - 1] ?? 'Unknown',
-              };
-            });
+          return ({ error }: { error?: unknown } = {}) => {
+            const durationMs = Date.now() - startedAt;
+            const hasError = Boolean(error);
 
-            const event: BufferEvent = {
+            resolverTimings.push({ path, durationMs });
+            recordFieldMetrics(telemetry.operationMetrics, fieldKey, durationMs, {
               operationName,
               operationType,
-              fields: fieldUsages,
+              hasError,
+            });
+            finishSpan(span, durationMs, {
+              hasError,
+              errorMessage: extractMessage(error),
+            });
+          };
+        },
+
+        onExecuteDone(payloadDone: { result?: { errors?: readonly unknown[] } }) {
+          try {
+            const durationMs = Date.now() - startTime;
+            const hasErrors = (payloadDone.result?.errors?.length ?? 0) > 0;
+
+            recordOperationMetrics(
+              telemetry.operationMetrics,
+              {
+                operationName,
+                operationType,
+                clientName,
+                hasErrors,
+              },
+              {
+                durationMs,
+                fieldCount: queryMetrics.fieldCount,
+                queryDepth: queryMetrics.queryDepth,
+                complexityScore: queryMetrics.complexityScore,
+              }
+            );
+
+            telemetry.udpBuffer?.push({
+              operationName,
+              operationType,
+              fields: [...fieldUsage.values()],
               durationMs,
-              resolverTimings: [],
+              resolverTimings,
+              clientName,
               timestamp: Date.now(),
               hasErrors,
-            };
+              queryDepth: queryMetrics.queryDepth,
+              fieldCount: queryMetrics.fieldCount,
+              complexityScore: queryMetrics.complexityScore,
+            });
 
-            buffer.push(event);
-          } catch (_e) {
-            // Silently swallow
+            finishSpan(rootSpan, durationMs, { hasError: hasErrors });
+          } catch {
+            finishSpan(rootSpan, Date.now() - startTime, { hasError: true });
           }
         },
       };
     },
+
+    async onDispose() {
+      try {
+        await telemetry.udpBuffer?.shutdown();
+        telemetry.udpTransport?.close();
+        await shutdownOTel();
+      } catch {
+        // SDK must never fail host shutdown.
+      }
+    },
   };
 }
 
-function collectFields(
-  obj: Record<string, unknown>,
-  path: string,
-  fields: Set<string>
-): void {
-  for (const key in obj) {
-    const fullPath = path ? `${path}.${key}` : key;
-    fields.add(fullPath);
-    const val = obj[key];
-    if (val && typeof val === 'object') {
-      if (Array.isArray(val)) {
-        for (const item of val) {
-          if (item && typeof item === 'object') {
-            collectFields(item as Record<string, unknown>, fullPath, fields);
-          }
-        }
-      } else {
-        collectFields(val as Record<string, unknown>, fullPath, fields);
-      }
-    }
-  }
-}
+
 

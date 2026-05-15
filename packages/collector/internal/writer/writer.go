@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,9 +22,27 @@ type AggregatedData struct {
 	P99Ms         float64
 }
 
-var dbPool *pgxpool.Pool
+type OperationRecord struct {
+	Timestamp       time.Time
+	OperationName   string
+	OperationType   string
+	DurationMs      float64
+	HasErrors       bool
+	ClientName      *string
+	QueryDepth      int32
+	FieldCount      int32
+	ComplexityScore int32
+}
 
-// Start initializes the database connection pool
+type schemaSupport struct {
+	operationQueryShape bool
+	resolverOperation   bool
+}
+
+var dbPool *pgxpool.Pool
+var support schemaSupport
+
+// Start initializes the database connection pool.
 func Start(dbWriteURL string) func() {
 	config, err := pgxpool.ParseConfig(dbWriteURL)
 	if err != nil {
@@ -38,9 +58,12 @@ func Start(dbWriteURL string) func() {
 		log.Fatalf("Failed to create DB pool: %v", errInit)
 	}
 
-	// Test connection
 	if err := dbPool.Ping(context.Background()); err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
+	}
+
+	if err := loadSchemaSupport(context.Background()); err != nil {
+		log.Printf("Warning: failed to inspect DB schema support: %v", err)
 	}
 
 	log.Println("✓ Database connection established")
@@ -52,108 +75,226 @@ func Start(dbWriteURL string) func() {
 	}
 }
 
-// WriteAggregatedData writes aggregated data to TimescaleDB with retry logic
-func WriteAggregatedData(ctx context.Context, data *AggregatedData) error {
+// WriteFlushBatch writes a full collector flush to TimescaleDB with retry logic.
+func WriteFlushBatch(ctx context.Context, aggregated []AggregatedData, operations []OperationRecord) error {
 	if dbPool == nil {
 		return fmt.Errorf("database pool not initialized")
 	}
 
+	if len(aggregated) == 0 && len(operations) == 0 {
+		return nil
+	}
+
 	maxRetries := 3
-	backoff := time.Millisecond * 100
+	backoff := 100 * time.Millisecond
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := writeWithCOPY(ctx, data)
+		err := writeBatch(ctx, aggregated, operations)
 		if err == nil {
 			return nil
 		}
 
-		if attempt < maxRetries-1 {
-			time.Sleep(backoff)
-			backoff *= 2
-		} else {
-			log.Printf("Failed to write data after %d retries: %v", maxRetries, err)
+		if attempt == maxRetries-1 {
+			log.Printf("Failed to write batch after %d retries: %v", maxRetries, err)
 			return err
 		}
+
+		time.Sleep(backoff)
+		backoff *= 2
 	}
 
 	return fmt.Errorf("max retries exceeded")
 }
 
-func writeWithCOPY(ctx context.Context, data *AggregatedData) error {
+func writeBatch(ctx context.Context, aggregated []AggregatedData, operations []OperationRecord) error {
 	conn, err := dbPool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to acquire connection: %w", err)
 	}
 	defer conn.Release()
 
-	// Insert into field_usage table
-	query := `
-		INSERT INTO field_usage (time, type_name, field_name, call_count, error_count)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (time, type_name, field_name) DO UPDATE
-		SET call_count = field_usage.call_count + $4,
-		    error_count = field_usage.error_count + $5
-	`
-
-	parts := splitFieldPath(data.FieldPath)
-	typeName := parts[0]
-	fieldName := parts[len(parts)-1]
-
-	_, err = conn.Exec(ctx, query,
-		data.Timestamp,
-		typeName,
-		fieldName,
-		data.CallCount,
-		data.ErrorCount,
-	)
-
+	tx, err := conn.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to insert field usage: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	batch := &pgx.Batch{}
+
+	for _, operation := range operations {
+		if support.operationQueryShape {
+			batch.Queue(`
+				INSERT INTO operations (
+					time,
+					operation_name,
+					operation_type,
+					duration_ms,
+					has_errors,
+					client_name,
+					query_depth,
+					field_count,
+					complexity_score
+				)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			`,
+				operation.Timestamp,
+				normalizeOperationName(operation.OperationName),
+				operation.OperationType,
+				operation.DurationMs,
+				operation.HasErrors,
+				operation.ClientName,
+				operation.QueryDepth,
+				operation.FieldCount,
+				operation.ComplexityScore,
+			)
+		} else {
+			batch.Queue(`
+				INSERT INTO operations (
+					time,
+					operation_name,
+					operation_type,
+					duration_ms,
+					has_errors,
+					client_name
+				)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`,
+				operation.Timestamp,
+				normalizeOperationName(operation.OperationName),
+				operation.OperationType,
+				operation.DurationMs,
+				operation.HasErrors,
+				operation.ClientName,
+			)
+		}
 	}
 
-	// Insert into resolver_timings table
-	timingQuery := `
-		INSERT INTO resolver_timings (time, field_path, p50_ms, p95_ms, p99_ms, call_count)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (time, field_path) DO UPDATE
-		SET p50_ms = $3, p95_ms = $4, p99_ms = $5, call_count = $6
-	`
+	for _, data := range aggregated {
+		parts := splitFieldPath(data.FieldPath)
+		typeName := parts[0]
+		fieldName := parts[len(parts)-1]
 
-	_, err = conn.Exec(ctx, timingQuery,
-		data.Timestamp,
-		data.FieldPath,
-		data.P50Ms,
-		data.P95Ms,
-		data.P99Ms,
-		data.CallCount,
-	)
+		batch.Queue(`
+			INSERT INTO field_usage (time, type_name, field_name, call_count, error_count)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (time, type_name, field_name) DO UPDATE
+			SET call_count = field_usage.call_count + EXCLUDED.call_count,
+			    error_count = field_usage.error_count + EXCLUDED.error_count
+		`,
+			data.Timestamp,
+			typeName,
+			fieldName,
+			data.CallCount,
+			data.ErrorCount,
+		)
 
-	if err != nil {
-		return fmt.Errorf("failed to insert resolver timings: %w", err)
+		if support.resolverOperation {
+			batch.Queue(`
+				INSERT INTO resolver_timings (time, operation_name, field_path, p50_ms, p95_ms, p99_ms, call_count)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				ON CONFLICT (time, operation_name, field_path) DO UPDATE
+				SET p50_ms = EXCLUDED.p50_ms,
+				    p95_ms = EXCLUDED.p95_ms,
+				    p99_ms = EXCLUDED.p99_ms,
+				    call_count = resolver_timings.call_count + EXCLUDED.call_count
+			`,
+				data.Timestamp,
+				normalizeOperationName(data.OperationName),
+				data.FieldPath,
+				data.P50Ms,
+				data.P95Ms,
+				data.P99Ms,
+				data.CallCount,
+			)
+		} else {
+			batch.Queue(`
+				INSERT INTO resolver_timings (time, field_path, p50_ms, p95_ms, p99_ms, call_count)
+				VALUES ($1, $2, $3, $4, $5, $6)
+				ON CONFLICT (time, field_path) DO UPDATE
+				SET p50_ms = EXCLUDED.p50_ms,
+				    p95_ms = EXCLUDED.p95_ms,
+				    p99_ms = EXCLUDED.p99_ms,
+				    call_count = resolver_timings.call_count + EXCLUDED.call_count
+			`,
+				data.Timestamp,
+				data.FieldPath,
+				data.P50Ms,
+				data.P95Ms,
+				data.P99Ms,
+				data.CallCount,
+			)
+		}
+	}
+
+	results := tx.SendBatch(ctx, batch)
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to execute batch: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit batch: %w", err)
 	}
 
 	return nil
 }
 
 func splitFieldPath(path string) []string {
-	var parts []string
-	current := ""
+	parts := strings.Split(path, ".")
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			cleaned = append(cleaned, part)
+		}
+	}
+	if len(cleaned) == 0 {
+		return []string{"Unknown"}
+	}
+	return cleaned
+}
 
-	for _, ch := range path {
-		if ch == '.' {
-			if current != "" {
-				parts = append(parts, current)
-				current = ""
-			}
-		} else {
-			current += string(ch)
+func normalizeOperationName(value string) string {
+	if value == "" {
+		return "anonymous"
+	}
+	return value
+}
+
+func loadSchemaSupport(ctx context.Context) error {
+	rows, err := dbPool.Query(ctx, `
+		SELECT table_name, column_name
+		FROM information_schema.columns
+		WHERE table_schema = 'public'
+		  AND table_name IN ('operations', 'resolver_timings')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to inspect schema support: %w", err)
+	}
+	defer rows.Close()
+
+	operationColumns := map[string]bool{}
+	resolverColumns := map[string]bool{}
+	for rows.Next() {
+		var tableName string
+		var columnName string
+		if err := rows.Scan(&tableName, &columnName); err != nil {
+			return fmt.Errorf("failed to scan schema support row: %w", err)
+		}
+		if tableName == "operations" {
+			operationColumns[columnName] = true
+		}
+		if tableName == "resolver_timings" {
+			resolverColumns[columnName] = true
 		}
 	}
 
-	if current != "" {
-		parts = append(parts, current)
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to iterate schema support rows: %w", err)
 	}
 
-	return parts
+	support.operationQueryShape = operationColumns["query_depth"] && operationColumns["field_count"] && operationColumns["complexity_score"]
+	support.resolverOperation = resolverColumns["operation_name"]
+	return nil
 }
 

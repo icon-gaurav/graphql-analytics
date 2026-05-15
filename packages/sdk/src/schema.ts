@@ -12,6 +12,9 @@ export interface OperationEvent {
   clientName?: string;
   timestamp: number;
   hasErrors: boolean;
+  queryDepth: number;
+  fieldCount: number;
+  complexityScore: number;
 }
 
 export interface FieldUsage {

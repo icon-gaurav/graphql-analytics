@@ -83,8 +83,10 @@ async function startServer() {
     resolvers,
     plugins: [
       GraphQLAnalyticsPlugin({
-        host: process.env.COLLECTOR_HOST || 'localhost',
-        port: parseInt(process.env.COLLECTOR_PORT || '9000'),
+        serviceName: 'test-graphql-server',
+        collectorUrl: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318',
+        metricsIntervalMs: parseInt(process.env.OTEL_METRICS_INTERVAL || '30000'),
+        enabled: process.env.OTEL_ENABLED !== 'false',
       }),
     ],
   });
@@ -94,7 +96,10 @@ async function startServer() {
   });
 
   console.log(`✓ Test server ready at ${url}`);
-  console.log(`✓ Sending events to analytics collector at ${process.env.COLLECTOR_HOST || 'localhost'}:${process.env.COLLECTOR_PORT || '9000'}`);
+  console.log(`✓ OpenTelemetry enabled: sending traces/metrics to ${process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318'}`);
+  console.log(`\n📊 Observability dashboards:`);
+  console.log(`  - Jaeger UI (traces): http://localhost:16686`);
+  console.log(`  - Prometheus (metrics): http://localhost:9090`);
   console.log(`\n📝 Sample queries:\n`);
   console.log(`  # Get user with posts`);
   console.log(`  query { user(id: "1") { id name email posts { id title } } }\n`);
