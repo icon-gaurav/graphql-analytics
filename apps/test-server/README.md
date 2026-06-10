@@ -19,7 +19,7 @@ npm run dev
 Should output:
 ```
 ✓ Test server ready at http://localhost:4000
-✓ Sending events to analytics collector at localhost:9000
+✓ OpenTelemetry enabled: sending traces/metrics to http://localhost:4318
 ```
 
 ### 3. In another terminal, fire sample queries
@@ -73,15 +73,16 @@ Environment variables:
 
 ```bash
 PORT=4000                      # GraphQL server port
-COLLECTOR_HOST=localhost       # Analytics collector host
-COLLECTOR_PORT=9000            # Analytics collector UDP port
+GRAPHQL_ANALYTICS_COLLECTOR_URL=http://localhost:4318  # OTLP HTTP endpoint
+GRAPHQL_ANALYTICS_METRICS_INTERVAL=30000               # Metrics export interval (ms)
+GRAPHQL_ANALYTICS_ENABLED=true                         # Enable/disable telemetry export
 SERVER_HOST=localhost          # For test:queries
 SERVER_PORT=4000               # For test:queries
 ```
 
 Example:
 ```bash
-COLLECTOR_HOST=192.168.1.100 COLLECTOR_PORT=9000 npm run dev
+GRAPHQL_ANALYTICS_COLLECTOR_URL=http://192.168.1.100:4318 npm run dev
 ```
 
 ## Fixture Data

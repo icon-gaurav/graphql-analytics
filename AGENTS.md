@@ -5,8 +5,8 @@
 ## Core Architecture
 
 **Three-service design** (single `docker-compose.yml` deployment):
-- **SDK** (`packages/sdk`): TypeScript plugin for Apollo Server / GraphQL Yoga — captures operation events and sends via UDP to collector (fire-and-forget, never blocks GraphQL execution)
-- **Collector** (`packages/collector`): Go service — listens on UDP 9000, aggregates events into 1-minute buckets, batch-writes to TimescaleDB
+- **SDK** (`packages/sdk`): TypeScript plugin for Apollo Server / GraphQL Yoga — captures operation telemetry and exports via OTLP HTTP (never blocks GraphQL execution)
+- **Collector** (`packages/collector`): Go service — receives OTLP traces on HTTP 4318, aggregates events into 1-minute buckets, batch-writes to TimescaleDB
 - **Displayer** (`apps/displayer`): Next.js app — read-only queries on aggregated data, exposes dashboard + tRPC API
 
 **Critical constraint:** SDK must never block the user's GraphQL response path. If collector is unreachable, events silently drop.
@@ -19,7 +19,7 @@
 npm install
 npm run build
 
-# SDK tests: unit tests with Vitest, mock UDP sender
+# SDK tests: unit tests with Vitest
 cd packages/sdk && npm run test
 
 # Collector tests: Go tests with in-memory channel
@@ -58,7 +58,7 @@ buffer.push(event)  // drops oldest if full
 
 1. User's GraphQL server → Apollo/Yoga plugin captures field paths + timings
 2. Plugin → ring buffer (in-memory, ring can have backlog)
-3. Buffer → UDP batch to collector (lost if network fails)
+3. SDK OTel exporter → OTLP HTTP batch to collector (best-effort async export)
 4. Collector intake → buffered Go channel (internal/10,000 cap)
 5. Aggregator goroutine → 1-min buckets (with p50/p95/p99)
 6. Writer → COPY protocol batch insert to TimescaleDB

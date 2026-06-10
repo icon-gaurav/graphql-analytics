@@ -18,7 +18,7 @@
 │   User's GraphQL server │
 │   SDK plugin (TS/JS)    │  ← in-memory ring buffer, async flush
 └────────────┬────────────┘
-             │ UDP (fire-and-forget, protobuf payload)
+             │ OTLP HTTP (traces + metrics)
              ▼
 ┌─────────────────────────┐
 │   Collector service     │  ← Go, stateless, fast

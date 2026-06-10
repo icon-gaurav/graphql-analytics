@@ -28,14 +28,11 @@ services:
       context: ./packages/collector
       dockerfile: Dockerfile
     environment:
-      COLLECTOR_UDP_PORT: 9000
-      OTLP_ENABLED: "true"
       OTLP_HTTP_PORT: "4318"
       COLLECTOR_DB_URL: postgres://collector_user:password@timescaledb:5432/graphql_analytics?sslmode=disable
       FLUSH_INTERVAL_SECONDS: 60
       BUCKET_CHANNEL_SIZE: 10000
     ports:
-      - "9000:9000/udp"   # UDP legacy intake
       - "4318:4318"        # OTLP HTTP — SDK sends here directly
       - "9001:9001"        # metrics /metrics endpoint
     depends_on:
