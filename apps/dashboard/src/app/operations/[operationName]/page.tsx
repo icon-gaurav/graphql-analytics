@@ -50,6 +50,25 @@ interface OperationTrendRaw {
   p95Ms: number;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function highlightGraphQL(value: string): string {
+  const escaped = escapeHtml(value);
+  return escaped
+    .replace(/("(?:[^"\\]|\\.)*")/g, '<span class="gql-string">$1</span>')
+    .replace(/\b(query|mutation|subscription|fragment|on)\b/g, '<span class="gql-keyword">$1</span>')
+    .replace(/(\$[A-Za-z_][A-Za-z0-9_]*)/g, '<span class="gql-variable">$1</span>')
+    .replace(/(#[^\n]*)/g, '<span class="gql-comment">$1</span>')
+    .replace(/\b(true|false|null)\b/g, '<span class="gql-constant">$1</span>');
+}
+
 export default function OperationDetailsPage() {
   const params = useParams<{ operationName: string }>();
   const operationName = decodeURIComponent(params.operationName ?? '');
@@ -59,6 +78,8 @@ export default function OperationDetailsPage() {
   const [resolvers, setResolvers] = useState<ResolverPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copiedQuery, setCopiedQuery] = useState(false);
+  const [copiedHeaders, setCopiedHeaders] = useState(false);
 
   const from = useMemo(() => new Date(Date.now() - 24 * 60 * 60 * 1000), []);
   const to = useMemo(() => new Date(), []);
@@ -102,6 +123,34 @@ export default function OperationDetailsPage() {
     p95: Math.round(row.p95Ms),
     p99: Math.round(row.p99Ms),
   }));
+
+  const headersPretty = useMemo(() => {
+    if (!details?.requestHeaders) {
+      return '';
+    }
+    return JSON.stringify(details.requestHeaders, null, 2);
+  }, [details?.requestHeaders]);
+
+  const highlightedQuery = useMemo(() => {
+    if (!details?.operationQuery) return '';
+    return highlightGraphQL(details.operationQuery);
+  }, [details?.operationQuery]);
+
+  const copyToClipboard = async (text: string, kind: 'query' | 'headers') => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      if (kind === 'query') {
+        setCopiedQuery(true);
+        setTimeout(() => setCopiedQuery(false), 1200);
+      } else {
+        setCopiedHeaders(true);
+        setTimeout(() => setCopiedHeaders(false), 1200);
+      }
+    } catch {
+      // Ignore clipboard errors; keep UX non-blocking.
+    }
+  };
 
   return (
     <div className="dash-page">
@@ -200,12 +249,22 @@ export default function OperationDetailsPage() {
               <article className="dash-card table-card">
                 <div className="table-head">
                   <p><i className="ti ti-code" /> Full operation query</p>
-                  <span className="spark-pill">latest</span>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      className="spark-pill"
+                      onClick={() => copyToClipboard(details.operationQuery ?? '', 'query')}
+                      style={{ border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent' }}
+                    >
+                      {copiedQuery ? 'Copied' : 'Copy'}
+                    </button>
+                    <span className="spark-pill">latest</span>
+                  </div>
                 </div>
                 <div className="table-body">
                   <div className="table-row" style={{ alignItems: 'start' }}>
                     <pre
-                      className="mono"
+                      className="mono gql-block"
                       style={{
                         margin: 0,
                         whiteSpace: 'pre-wrap',
@@ -214,7 +273,11 @@ export default function OperationDetailsPage() {
                         color: 'var(--text-primary)',
                       }}
                     >
-                      {details.operationQuery || 'No query captured for this operation yet.'}
+                      {details.operationQuery ? (
+                        <code dangerouslySetInnerHTML={{ __html: highlightedQuery }} />
+                      ) : (
+                        'No query captured for this operation yet.'
+                      )}
                     </pre>
                   </div>
                 </div>
@@ -223,25 +286,46 @@ export default function OperationDetailsPage() {
               <article className="dash-card table-card">
                 <div className="table-head">
                   <p><i className="ti ti-braces" /> Request headers</p>
-                  <span className="spark-pill">latest</span>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      className="spark-pill"
+                      onClick={() => copyToClipboard(headersPretty, 'headers')}
+                      style={{ border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent' }}
+                    >
+                      {copiedHeaders ? 'Copied' : 'Copy'}
+                    </button>
+                    <span className="spark-pill">latest</span>
+                  </div>
                 </div>
                 <div className="table-body">
-                  <div className="table-row" style={{ alignItems: 'start' }}>
-                    <pre
-                      className="mono"
-                      style={{
-                        margin: 0,
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        width: '100%',
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      {details.requestHeaders
-                        ? JSON.stringify(details.requestHeaders, null, 2)
-                        : 'No headers captured for this operation yet.'}
-                    </pre>
-                  </div>
+                  {details.requestHeaders && Object.keys(details.requestHeaders).length > 0 ? (
+                    Object.entries(details.requestHeaders)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([key, value]) => (
+                        <div className="table-row" key={key}>
+                          <div className="row-name mono">
+                            <span className="prefix accent">{key}</span>
+                          </div>
+                          <div className="row-metric" style={{ maxWidth: '60%' }}>
+                            <span
+                              className="mono"
+                              style={{
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                textAlign: 'right',
+                              }}
+                            >
+                              {value}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                  ) : (
+                    <div className="table-row">
+                      <div className="row-name"><span>No headers captured for this operation yet.</span></div>
+                    </div>
+                  )}
                 </div>
               </article>
             </section>

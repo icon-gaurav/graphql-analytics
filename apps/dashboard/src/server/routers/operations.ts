@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parse, print } from 'graphql';
 import { publicProcedure, router } from '../trpc';
 import { getDB } from '../db';
 import { getTableColumns } from '../feature-support';
@@ -45,6 +46,18 @@ interface OperationDetailRow {
 interface OperationPayloadRow {
   operation_query: string | null;
   request_headers: Record<string, string> | null;
+}
+
+function formatGraphQLQuery(query: string | null): string | null {
+  if (!query || !query.trim()) {
+    return null;
+  }
+
+  try {
+    return print(parse(query));
+  } catch {
+    return query;
+  }
 }
 
 interface OperationTrendRow {
@@ -247,7 +260,7 @@ const operationsRouter = router({
         p50Ms: Number(row.p50_ms || 0),
         p95Ms: Number(row.p95_ms || 0),
         p99Ms: Number(row.p99_ms || 0),
-        operationQuery: payload?.operation_query ?? null,
+        operationQuery: formatGraphQLQuery(payload?.operation_query ?? null),
         requestHeaders: payload?.request_headers ?? null,
       };
     }),
