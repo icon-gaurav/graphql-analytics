@@ -258,6 +258,7 @@ body::before {
 }
 
 .status-dot-success { background: var(--success); }
+.status-dot-danger { background: var(--danger); }
 
 .spark-card {
   padding-top: 16px;

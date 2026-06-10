@@ -9,7 +9,110 @@ interface VolumeRow { hour: string; call_count: string }
 interface ClientRow { client_name: string | null; call_count: string; error_count: string }
 interface LastSeenRow { last_seen_at: Date | null }
 
+interface PingRow { ok: number }
+
+interface FreshnessRow { last_seen_at: Date | null }
+
 const overviewRouter = router({
+  health: publicProcedure.query(async () => {
+    const checkedAt = new Date();
+    const collectorHealthUrl = process.env.COLLECTOR_HEALTH_URL ?? 'http://collector:4318/health';
+
+    let collector = {
+      ok: false,
+      statusCode: 0,
+      message: 'unreachable',
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    try {
+      const response = await fetch(collectorHealthUrl, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+        },
+        cache: 'no-store',
+      });
+
+      collector = {
+        ok: response.ok,
+        statusCode: response.status,
+        message: response.ok ? 'healthy' : `http_${response.status}`,
+      };
+    } catch {
+      collector = {
+        ok: false,
+        statusCode: 0,
+        message: 'timeout_or_network_error',
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const db = getDB();
+    let database = {
+      ok: false,
+      message: 'unreachable',
+    };
+    let pipeline = {
+      ok: false,
+      lastSeenAt: null as Date | null,
+      lagSeconds: null as number | null,
+      message: 'unknown',
+    };
+
+    try {
+      const ping = await db<PingRow[]>`SELECT 1 as ok`;
+      database = {
+        ok: ping[0]?.ok === 1,
+        message: ping[0]?.ok === 1 ? 'healthy' : 'query_failed',
+      };
+
+      const freshness = await db<FreshnessRow[]>`
+        SELECT MAX(time) as last_seen_at
+        FROM operations
+      `;
+
+      const lastSeenAt = freshness[0]?.last_seen_at ?? null;
+      if (!lastSeenAt) {
+        pipeline = {
+          ok: false,
+          lastSeenAt: null,
+          lagSeconds: null,
+          message: 'no_events_yet',
+        };
+      } else {
+        const lagSeconds = Math.round((checkedAt.getTime() - lastSeenAt.getTime()) / 1000);
+        pipeline = {
+          ok: lagSeconds <= 180,
+          lastSeenAt,
+          lagSeconds,
+          message: lagSeconds <= 180 ? 'fresh' : 'stale',
+        };
+      }
+    } catch {
+      database = {
+        ok: false,
+        message: 'query_error',
+      };
+      pipeline = {
+        ok: false,
+        lastSeenAt: null,
+        lagSeconds: null,
+        message: 'db_unavailable',
+      };
+    }
+
+    return {
+      checkedAt,
+      collector,
+      database,
+      pipeline,
+    };
+  }),
+
   hourlyVolume: publicProcedure.query(async () => {
     const db = getDB();
     const now = new Date();

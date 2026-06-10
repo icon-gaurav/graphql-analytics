@@ -24,31 +24,44 @@ services:
     restart: unless-stopped
 
   collector:
-    build:
-      context: ../apps/collector
-      dockerfile: Dockerfile
+    image: golang:1.22.5-alpine3.20
+    pull_policy: always
+    user: "0:0"
+    working_dir: /workspace/apps/collector
+    command: sh -c "go mod tidy && go mod download && go run ./cmd/collector"
+    volumes:
+      - ..:/workspace
     environment:
       OTLP_HTTP_PORT: "4318"
       COLLECTOR_DB_URL: postgres://collector_user:password@timescaledb:5432/graphql_analytics?sslmode=disable
       FLUSH_INTERVAL_SECONDS: 60
       BUCKET_CHANNEL_SIZE: 10000
     ports:
-      - "4318:4318"        # OTLP HTTP — SDK sends here directly
-      - "9001:9001"        # metrics /metrics endpoint
+      - "4318:4318"
+      - "9001:9001"
     depends_on:
       timescaledb:
         condition: service_healthy
     restart: unless-stopped
 
   dashboard:
-    build:
-      context: ..
-      dockerfile: apps/dashboard/Dockerfile
+    image: node:20-alpine
+    user: "0:0"
+    working_dir: /workspace
+    command: sh -c "npm install && npm run dev --workspace=apps/dashboard"
+    volumes:
+      - ..:/workspace
+      - dashboard_root_node_modules:/workspace/node_modules
+      - dashboard_app_node_modules:/workspace/apps/dashboard/node_modules
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
+      NPM_CONFIG_CACHE: /tmp/.npm
       COLLECTOR_DB_URL: postgres://displayer_user:password@timescaledb:5432/graphql_analytics?sslmode=disable
       COLLECTOR_HEALTH_URL: http://collector:4318/health
-      SCHEMA_SDL_PATH: /schema/schema.graphql
+      SCHEMA_SDL_PATH: /workspace/schemas/schema.graphql
+      WATCHPACK_POLLING: "true"
+      WATCHPACK_POLLING_INTERVAL: "1000"
+      CHOKIDAR_USEPOLLING: "1"
     ports:
       - "3000:3000"
     depends_on:
@@ -56,19 +69,25 @@ services:
         condition: service_healthy
       collector:
         condition: service_started
-    volumes:
-      - ../schemas/schema.graphql:/schema/schema.graphql:ro
     restart: unless-stopped
 
   test-server:
-    build:
-      context: ..
-      dockerfile: examples/test-server/Dockerfile
+    image: node:20-alpine
+    user: "0:0"
+    working_dir: /workspace
+    command: sh -c "npm install --include=dev && npm install --workspace=examples/test-server --include=dev && npm exec --workspace=examples/test-server tsx watch src/server.ts"
+    volumes:
+      - ..:/workspace
+      - test_server_root_node_modules:/workspace/node_modules
+      - test_server_node_modules:/workspace/examples/test-server/node_modules
     environment:
+      NPM_CONFIG_CACHE: /tmp/.npm
+      NPM_CONFIG_PRODUCTION: "false"
       PORT: 4000
       GRAPHQL_ANALYTICS_COLLECTOR_URL: http://collector:4318
       GRAPHQL_ANALYTICS_METRICS_INTERVAL: 30000
       GRAPHQL_ANALYTICS_ENABLED: "true"
+      CHOKIDAR_USEPOLLING: "1"
     ports:
       - "4000:4000"
     depends_on:
@@ -78,3 +97,8 @@ services:
 
 volumes:
   timescale_data:
+  dashboard_root_node_modules:
+  dashboard_app_node_modules:
+  test_server_root_node_modules:
+  test_server_node_modules:
+

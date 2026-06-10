@@ -14,6 +14,25 @@ interface SummaryData {
   lastSeenAt: string | null;
 }
 
+interface HealthData {
+  checkedAt: string;
+  collector: {
+    ok: boolean;
+    statusCode: number;
+    message: string;
+  };
+  database: {
+    ok: boolean;
+    message: string;
+  };
+  pipeline: {
+    ok: boolean;
+    lastSeenAt: string | null;
+    lagSeconds: number | null;
+    message: string;
+  };
+}
+
 const HOUR_LABELS = Array.from({ length: 24 }, (_, i) => {
   if (i === 0) return '00:00';
   if (i === 6) return '06:00';
@@ -35,13 +54,15 @@ export default function OverviewPage() {
   const [volumeData, setVolumeData] = useState<number[]>(() => normalizeVolumeData([]));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthData | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [summaryResult, volumeResult] = await Promise.allSettled([
+        const [summaryResult, volumeResult, healthResult] = await Promise.allSettled([
           trpc.overview.summary.query(),
           trpc.overview.hourlyVolume.query(),
+          trpc.overview.health.query(),
         ]);
 
         if (summaryResult.status === 'fulfilled') {
@@ -56,6 +77,12 @@ export default function OverviewPage() {
           // Keep graph stable even when hourly volume query fails transiently.
           setVolumeData(normalizeVolumeData([]));
           setError('Volume data temporarily unavailable. Showing fallback data.');
+        }
+
+        if (healthResult.status === 'fulfilled') {
+          setHealth(healthResult.value as HealthData);
+        } else {
+          setHealth(null);
         }
       } catch (err: any) {
         setError(err.message);
@@ -106,6 +133,30 @@ export default function OverviewPage() {
 
     return new Date(data.lastSeenAt).toLocaleString();
   }, [data?.lastSeenAt]);
+
+  const statusClass = (ok: boolean) => (ok ? 'status-dot-success' : 'status-dot-danger');
+
+  const collectorStatusText = health
+    ? health.collector.ok
+      ? 'Operational'
+      : `Down (${health.collector.message})`
+    : 'Checking...';
+
+  const databaseStatusText = health
+    ? health.database.ok
+      ? 'Operational'
+      : `Down (${health.database.message})`
+    : 'Checking...';
+
+  const pipelineStatusText = health
+    ? health.pipeline.ok
+      ? `Fresh (${health.pipeline.lagSeconds ?? 0}s lag)`
+      : health.pipeline.message === 'no_events_yet'
+        ? 'No events yet'
+        : health.pipeline.message === 'stale'
+          ? `Stale (${health.pipeline.lagSeconds ?? 0}s lag)`
+          : 'Unavailable'
+    : 'Checking...';
 
   return (
     <div className="dash-page">
@@ -167,9 +218,9 @@ export default function OverviewPage() {
               <article className="dash-card metric-card">
                 <p className="metric-label">Status</p>
                 <div className="status-grid">
-                  <div className="status-row"><span className="status-dot status-dot-success" />Collector <span>Operational</span></div>
-                  <div className="status-row"><span className="status-dot status-dot-success" />Dashboard <span>Operational</span></div>
-                  <div className="status-row"><span className="status-dot status-dot-success" />Database <span>Operational</span></div>
+                  <div className="status-row"><span className={`status-dot ${statusClass(health?.collector.ok ?? false)}`} />Collector <span>{collectorStatusText}</span></div>
+                  <div className="status-row"><span className={`status-dot ${statusClass(health?.database.ok ?? false)}`} />Database <span>{databaseStatusText}</span></div>
+                  <div className="status-row"><span className={`status-dot ${statusClass(health?.pipeline.ok ?? false)}`} />Pipeline <span>{pipelineStatusText}</span></div>
                 </div>
               </article>
             </section>
