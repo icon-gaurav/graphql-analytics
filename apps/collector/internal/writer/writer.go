@@ -2,6 +2,7 @@ package writer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -26,6 +27,8 @@ type OperationRecord struct {
 	Timestamp       time.Time
 	OperationName   string
 	OperationType   string
+	OperationQuery  *string
+	RequestHeaders  map[string]string
 	DurationMs      float64
 	HasErrors       bool
 	ClientName      *string
@@ -36,6 +39,7 @@ type OperationRecord struct {
 
 type schemaSupport struct {
 	operationQueryShape bool
+	operationPayload    bool
 	resolverOperation   bool
 }
 
@@ -60,6 +64,10 @@ func Start(dbWriteURL string) func() {
 
 	if err := dbPool.Ping(context.Background()); err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
+	}
+
+	if err := ensureOperationPayloadColumns(context.Background()); err != nil {
+		log.Printf("Warning: failed to ensure operation payload columns: %v", err)
 	}
 
 	if err := loadSchemaSupport(context.Background()); err != nil {
@@ -124,7 +132,36 @@ func writeBatch(ctx context.Context, aggregated []AggregatedData, operations []O
 	batch := &pgx.Batch{}
 
 	for _, operation := range operations {
-		if support.operationQueryShape {
+		if support.operationQueryShape && support.operationPayload {
+			batch.Queue(`
+				INSERT INTO operations (
+					time,
+					operation_name,
+					operation_type,
+					operation_query,
+					request_headers,
+					duration_ms,
+					has_errors,
+					client_name,
+					query_depth,
+					field_count,
+					complexity_score
+				)
+				VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
+			`,
+				operation.Timestamp,
+				normalizeOperationName(operation.OperationName),
+				operation.OperationType,
+				operation.OperationQuery,
+				headersJSON(operation.RequestHeaders),
+				operation.DurationMs,
+				operation.HasErrors,
+				operation.ClientName,
+				operation.QueryDepth,
+				operation.FieldCount,
+				operation.ComplexityScore,
+			)
+		} else if support.operationQueryShape {
 			batch.Queue(`
 				INSERT INTO operations (
 					time,
@@ -148,6 +185,29 @@ func writeBatch(ctx context.Context, aggregated []AggregatedData, operations []O
 				operation.QueryDepth,
 				operation.FieldCount,
 				operation.ComplexityScore,
+			)
+		} else if support.operationPayload {
+			batch.Queue(`
+				INSERT INTO operations (
+					time,
+					operation_name,
+					operation_type,
+					operation_query,
+					request_headers,
+					duration_ms,
+					has_errors,
+					client_name
+				)
+				VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
+			`,
+				operation.Timestamp,
+				normalizeOperationName(operation.OperationName),
+				operation.OperationType,
+				operation.OperationQuery,
+				headersJSON(operation.RequestHeaders),
+				operation.DurationMs,
+				operation.HasErrors,
+				operation.ClientName,
 			)
 		} else {
 			batch.Queue(`
@@ -261,6 +321,63 @@ func normalizeOperationName(value string) string {
 	return value
 }
 
+func headersJSON(headers map[string]string) []byte {
+	if len(headers) == 0 {
+		return []byte(`{}`)
+	}
+
+	encoded, err := json.Marshal(headers)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return encoded
+}
+
+func ensureOperationPayloadColumns(ctx context.Context) error {
+	if dbPool == nil {
+		return fmt.Errorf("database pool not initialized")
+	}
+
+	rows, err := dbPool.Query(ctx, `
+		SELECT column_name
+		FROM information_schema.columns
+		WHERE table_schema = 'public'
+		  AND table_name = 'operations'
+		  AND column_name IN ('operation_query', 'request_headers')
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to inspect operations columns: %w", err)
+	}
+	defer rows.Close()
+
+	found := map[string]bool{}
+	for rows.Next() {
+		var columnName string
+		if scanErr := rows.Scan(&columnName); scanErr != nil {
+			return fmt.Errorf("failed to scan operations column row: %w", scanErr)
+		}
+		found[columnName] = true
+	}
+	if rows.Err() != nil {
+		return fmt.Errorf("failed to iterate operations columns: %w", rows.Err())
+	}
+
+	if found["operation_query"] && found["request_headers"] {
+		return nil
+	}
+
+	_, err = dbPool.Exec(ctx, `
+		ALTER TABLE operations
+		ADD COLUMN IF NOT EXISTS operation_query TEXT,
+		ADD COLUMN IF NOT EXISTS request_headers JSONB DEFAULT '{}'::jsonb
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add operation payload columns: %w", err)
+	}
+
+	return nil
+}
+
 func loadSchemaSupport(ctx context.Context) error {
 	rows, err := dbPool.Query(ctx, `
 		SELECT table_name, column_name
@@ -294,6 +411,7 @@ func loadSchemaSupport(ctx context.Context) error {
 	}
 
 	support.operationQueryShape = operationColumns["query_depth"] && operationColumns["field_count"] && operationColumns["complexity_score"]
+	support.operationPayload = operationColumns["operation_query"] && operationColumns["request_headers"]
 	support.resolverOperation = resolverColumns["operation_name"]
 	return nil
 }

@@ -18,6 +18,7 @@ interface ResolverTiming {
 
 interface YogaExecuteArgs {
   operationName?: string | null;
+  query?: string;
   document?: DocumentNode;
   contextValue?: {
     request?: {
@@ -94,6 +95,29 @@ function extractMessage(error: unknown): string | undefined {
   return undefined;
 }
 
+function extractRequestHeaders(headers: { get(name: string): string | null } | undefined): Record<string, string> {
+  const headersWithForEach = headers as unknown as {
+    forEach?: (callback: (value: string, key: string) => void) => void;
+  };
+
+  if (!headersWithForEach || typeof headersWithForEach.forEach !== 'function') {
+    return {};
+  }
+
+  const output: Record<string, string> = {};
+  try {
+    headersWithForEach.forEach((value, key) => {
+      if (typeof value === 'string' && value.length > 0) {
+        output[key] = value;
+      }
+    });
+  } catch {
+    return {};
+  }
+
+  return output;
+}
+
 export function useGraphQLAnalytics(options: GraphQLAnalyticsYogaOptions = {}) {
   const telemetry = initializeRuntime(options);
 
@@ -102,15 +126,21 @@ export function useGraphQLAnalytics(options: GraphQLAnalyticsYogaOptions = {}) {
       const args = payload.args;
       const startTime = Date.now();
       const operationName = args.operationName ?? null;
+      const operationQuery = args.query ?? '';
       const operationType = inferOperationType(args.document, operationName);
       const queryMetrics = collectQueryMetrics(args.document, operationName);
       const clientName = args.contextValue?.request?.headers?.get('x-graphql-client-name') ?? undefined;
+      const requestHeaders = extractRequestHeaders(args.contextValue?.request?.headers);
 
       const rootSpan = createOperationSpan(operationName, operationType, {
         clientName,
         queryDepth: queryMetrics.queryDepth,
         fieldCount: queryMetrics.fieldCount,
         complexityScore: queryMetrics.complexityScore,
+      });
+      rootSpan.setAttributes({
+        'graphql.operation.query': operationQuery,
+        'graphql.request.headers_json': JSON.stringify(requestHeaders),
       });
 
        const fieldUsage = new Map<string, { typeName: string; fieldName: string }>();

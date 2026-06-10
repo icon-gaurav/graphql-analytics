@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { publicProcedure, router } from '../trpc';
 import { getDB } from '../db';
+import { getTableColumns } from '../feature-support';
 
 type RangeInput = {
   from: Date;
@@ -29,6 +30,28 @@ interface ErrorRateRow {
   hour: Date;
   total_calls: string;
   total_errors: string;
+}
+
+interface OperationDetailRow {
+  operation_name: string | null;
+  operation_type: string;
+  call_count: string;
+  error_count: string;
+  p50_ms: string;
+  p95_ms: string;
+  p99_ms: string;
+}
+
+interface OperationPayloadRow {
+  operation_query: string | null;
+  request_headers: Record<string, string> | null;
+}
+
+interface OperationTrendRow {
+  hour: Date;
+  call_count: string;
+  error_count: string;
+  p95_ms: string;
 }
 
 const operationsRouter = router({
@@ -156,6 +179,113 @@ const operationsRouter = router({
           totalCalls,
           totalErrors,
           errorRate: totalCalls > 0 ? (totalErrors / totalCalls) * 100 : 0,
+        };
+      });
+    }),
+
+  operationDetails: publicProcedure
+    .input(
+      z.object({
+        operationName: z.string().min(1),
+        from: z.string().or(z.date()).transform((d) => new Date(d)),
+        to: z.string().or(z.date()).transform((d) => new Date(d)),
+      })
+    )
+    .query(async ({ input }: { input: RangeInput & { operationName: string } }) => {
+      const db = getDB();
+      const operationColumns = await getTableColumns('operations');
+      const supportsOperationPayload =
+        operationColumns.has('operation_query') && operationColumns.has('request_headers');
+
+      const [result, payloadRows] = await Promise.all([
+        db<OperationDetailRow[]>`
+        SELECT
+          COALESCE(operation_name, 'anonymous') as operation_name,
+          operation_type,
+          COUNT(*) as call_count,
+          COUNT(*) FILTER (WHERE has_errors) as error_count,
+          percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) as p50_ms,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) as p95_ms,
+          percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ms) as p99_ms
+        FROM operations
+        WHERE time >= ${input.from}
+          AND time <= ${input.to}
+          AND COALESCE(operation_name, 'anonymous') = ${input.operationName}
+        GROUP BY COALESCE(operation_name, 'anonymous'), operation_type
+        ORDER BY call_count DESC
+        LIMIT 1
+      `,
+        supportsOperationPayload
+          ? db<OperationPayloadRow[]>`
+              SELECT
+                operation_query,
+                request_headers
+              FROM operations
+              WHERE time >= ${input.from}
+                AND time <= ${input.to}
+                AND COALESCE(operation_name, 'anonymous') = ${input.operationName}
+              ORDER BY time DESC
+              LIMIT 1
+            `
+          : Promise.resolve([] as OperationPayloadRow[]),
+      ]);
+
+      const row = result[0];
+      if (!row) {
+        return null;
+      }
+      const payload = payloadRows[0];
+
+      const callCount = Number(row.call_count || 0);
+      const errorCount = Number(row.error_count || 0);
+      return {
+        operationName: row.operation_name || 'anonymous',
+        operationType: row.operation_type,
+        callCount,
+        errorCount,
+        errorRate: callCount > 0 ? (errorCount / callCount) * 100 : 0,
+        p50Ms: Number(row.p50_ms || 0),
+        p95Ms: Number(row.p95_ms || 0),
+        p99Ms: Number(row.p99_ms || 0),
+        operationQuery: payload?.operation_query ?? null,
+        requestHeaders: payload?.request_headers ?? null,
+      };
+    }),
+
+  operationHourlyTrend: publicProcedure
+    .input(
+      z.object({
+        operationName: z.string().min(1),
+        from: z.string().or(z.date()).transform((d) => new Date(d)),
+        to: z.string().or(z.date()).transform((d) => new Date(d)),
+      })
+    )
+    .query(async ({ input }: { input: RangeInput & { operationName: string } }) => {
+      const db = getDB();
+
+      const result = await db<OperationTrendRow[]>`
+        SELECT
+          time_bucket('1 hour', time) as hour,
+          COUNT(*) as call_count,
+          COUNT(*) FILTER (WHERE has_errors) as error_count,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) as p95_ms
+        FROM operations
+        WHERE time >= ${input.from}
+          AND time <= ${input.to}
+          AND COALESCE(operation_name, 'anonymous') = ${input.operationName}
+        GROUP BY hour
+        ORDER BY hour
+      `;
+
+      return result.map((row) => {
+        const callCount = Number(row.call_count || 0);
+        const errorCount = Number(row.error_count || 0);
+        return {
+          hour: row.hour,
+          callCount,
+          errorCount,
+          errorRate: callCount > 0 ? (errorCount / callCount) * 100 : 0,
+          p95Ms: Number(row.p95_ms || 0),
         };
       });
     }),

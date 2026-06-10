@@ -12,6 +12,8 @@ const defaultEventChannelSize = 10000
 type OperationEvent struct {
 	OperationName   *string          `json:"operationName"`
 	OperationType   string           `json:"operationType"`
+	OperationQuery  *string          `json:"operationQuery"`
+	RequestHeaders  map[string]string `json:"requestHeaders"`
 	Fields          []FieldUsage     `json:"fields"`
 	DurationMs      float64          `json:"durationMs"`
 	ResolverTimings []ResolverTiming `json:"resolverTimings"`

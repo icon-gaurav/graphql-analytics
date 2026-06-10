@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS operations (
   time           TIMESTAMPTZ NOT NULL,
   operation_name TEXT,
   operation_type TEXT,
+  operation_query TEXT,
+  request_headers JSONB DEFAULT '{}'::jsonb,
   duration_ms    FLOAT,
   has_errors     BOOLEAN,
   client_name    TEXT,
@@ -34,6 +36,8 @@ CREATE TABLE IF NOT EXISTS operations (
 ALTER TABLE operations ADD COLUMN IF NOT EXISTS query_depth INTEGER DEFAULT 0;
 ALTER TABLE operations ADD COLUMN IF NOT EXISTS field_count INTEGER DEFAULT 0;
 ALTER TABLE operations ADD COLUMN IF NOT EXISTS complexity_score INTEGER DEFAULT 0;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS operation_query TEXT;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS request_headers JSONB DEFAULT '{}'::jsonb;
 
 SELECT create_hypertable('operations', 'time', if_not_exists => TRUE);
 SELECT add_retention_policy('operations', INTERVAL '7 days', if_not_exists => TRUE);

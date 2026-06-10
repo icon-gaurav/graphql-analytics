@@ -18,6 +18,8 @@ interface ResolverTiming {
 
 interface HeadersLike {
   get(name: string): string | null;
+  forEach?: (callback: (value: string, key: string) => void) => void;
+  entries?: () => IterableIterator<[string, string]>;
 }
 
 interface RequestLike {
@@ -120,6 +122,46 @@ function extractMessage(error: unknown): string | undefined {
   return undefined;
 }
 
+function extractRequestHeaders(headers: HeadersLike | Record<string, unknown> | undefined): Record<string, string> {
+  if (!headers) return {};
+
+  const output: Record<string, string> = {};
+  try {
+    if (typeof (headers as HeadersLike).forEach === 'function') {
+      (headers as HeadersLike).forEach?.((value, key) => {
+        if (typeof value === 'string' && value.length > 0) {
+          output[key] = value;
+        }
+      });
+      return output;
+    }
+
+    if (typeof (headers as HeadersLike).entries === 'function') {
+      const iterator = (headers as HeadersLike).entries?.();
+      if (iterator) {
+        for (const [key, value] of iterator) {
+          if (typeof value === 'string' && value.length > 0) {
+            output[key] = value;
+          }
+        }
+      }
+      return output;
+    }
+
+    for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+      if (typeof value === 'string') {
+        output[key] = value;
+      } else if (Array.isArray(value)) {
+        output[key] = value.filter((item): item is string => typeof item === 'string').join(',');
+      }
+    }
+  } catch {
+    return {};
+  }
+
+  return output;
+}
+
 export function GraphQLAnalyticsPlugin(options: GraphQLAnalyticsPluginOptions = {}) {
   const telemetry = initializeRuntime(options);
 
@@ -129,14 +171,20 @@ export function GraphQLAnalyticsPlugin(options: GraphQLAnalyticsPluginOptions = 
       const request = requestContext.request ?? {};
       const startTime = Date.now();
       const operationName = request.operationName ?? null;
+      const operationQuery = request.query ?? '';
       const operationType = inferOperationType(requestContext.document, operationName, request.query);
       const clientName = request.http?.headers?.get('x-graphql-client-name') ?? undefined;
+      const requestHeaders = extractRequestHeaders(request.http?.headers);
       const queryMetrics = collectQueryMetrics(requestContext.document, operationName);
       const rootSpan = createOperationSpan(operationName, operationType, {
         clientName,
         queryDepth: queryMetrics.queryDepth,
         fieldCount: queryMetrics.fieldCount,
         complexityScore: queryMetrics.complexityScore,
+      });
+      rootSpan.setAttributes({
+        'graphql.operation.query': operationQuery,
+        'graphql.request.headers_json': JSON.stringify(requestHeaders),
       });
 
        const fieldUsage = new Map<string, { typeName: string; fieldName: string }>();

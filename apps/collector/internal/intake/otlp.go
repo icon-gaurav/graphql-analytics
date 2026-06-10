@@ -1,6 +1,7 @@
 package intake
 
 import (
+	"encoding/json"
 	"encoding/hex"
 	"io"
 	"log"
@@ -90,6 +91,8 @@ func StartOTLPHTTPListener(port string, eventChan chan OperationEvent) (*http.Se
 type traceAggregate struct {
 	operationName   *string
 	operationType   string
+	operationQuery  *string
+	requestHeaders  map[string]string
 	clientName      *string
 	timestampMs     int64
 	durationMs      float64
@@ -155,6 +158,8 @@ func convertOTLPTracesToEvents(request *collectortracev1.ExportTraceServiceReque
 		events = append(events, OperationEvent{
 			OperationName:   aggregate.operationName,
 			OperationType:   normalizeOperationType(aggregate.operationType),
+			OperationQuery:  aggregate.operationQuery,
+			RequestHeaders:  aggregate.requestHeaders,
 			Fields:          fields,
 			DurationMs:      aggregate.durationMs,
 			ResolverTimings: aggregate.resolverTimings,
@@ -190,6 +195,15 @@ func applyRootSpan(aggregate *traceAggregate, span *tracev1.Span, attributes map
 	}
 
 	aggregate.queryDepth = readInt(attributes, "graphql.query.depth")
+	query := readString(attributes, "graphql.operation.query")
+	if query != "" {
+		aggregate.operationQuery = pointer(query)
+	}
+
+	headersJSON := readString(attributes, "graphql.request.headers_json")
+	if headersJSON != "" {
+		aggregate.requestHeaders = parseHeadersJSON(headersJSON)
+	}
 	aggregate.fieldCount = readInt(attributes, "graphql.query.field_count")
 	aggregate.complexityScore = readInt(attributes, "graphql.query.complexity_score")
 	aggregate.timestampMs = int64(span.StartTimeUnixNano / uint64(time.Millisecond))
@@ -257,6 +271,18 @@ func readInt(attributes map[string]*commonv1.AnyValue, key string) int {
 		return int(doubleValue)
 	}
 	return 0
+}
+
+func parseHeadersJSON(raw string) map[string]string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	parsed := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil
+	}
+	return parsed
 }
 
 func normalizeOperationType(value string) string {

@@ -14,6 +14,14 @@ interface SummaryData {
   lastSeenAt: string | null;
 }
 
+interface TopOperation {
+  operationName: string;
+  operationType: string;
+  callCount: number;
+  errorRate: number;
+  p95Ms: number;
+}
+
 interface HealthData {
   checkedAt: string;
   collector: {
@@ -55,14 +63,19 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
+  const [topOperations, setTopOperations] = useState<TopOperation[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [summaryResult, volumeResult, healthResult] = await Promise.allSettled([
+        const now = new Date();
+        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        const [summaryResult, volumeResult, healthResult, topOpsResult] = await Promise.allSettled([
           trpc.overview.summary.query(),
           trpc.overview.hourlyVolume.query(),
           trpc.overview.health.query(),
+          trpc.operations.topOperations.query({ from: oneDayAgo, to: now, limit: 5 }),
         ]);
 
         if (summaryResult.status === 'fulfilled') {
@@ -83,6 +96,12 @@ export default function OverviewPage() {
           setHealth(healthResult.value as HealthData);
         } else {
           setHealth(null);
+        }
+
+        if (topOpsResult.status === 'fulfilled') {
+          setTopOperations((topOpsResult.value as TopOperation[]) ?? []);
+        } else {
+          setTopOperations([]);
         }
       } catch (err: any) {
         setError(err.message);
@@ -336,7 +355,37 @@ export default function OverviewPage() {
               </article>
             </section>
 
-            <section className="dash-grid-2">
+            <section className="dash-grid-3">
+              <article className="dash-card table-card">
+                <div className="table-head">
+                  <p><i className="ti ti-chart-arcs-3" /> Top Operations</p>
+                  <span className="p99-badge">24h</span>
+                </div>
+                <div className="table-body">
+                  {topOperations.length > 0 ? topOperations.map((operation, idx) => (
+                    <Link
+                      href={`/operations/${encodeURIComponent(operation.operationName)}`}
+                      key={`${operation.operationType}.${operation.operationName}.${idx}`}
+                      className="table-row"
+                      style={{ textDecoration: 'none', color: 'inherit' }}
+                    >
+                      <div className="row-name mono">
+                        <span className="prefix accent">{operation.operationType} </span>
+                        <span>{operation.operationName}</span>
+                      </div>
+                      <div className="row-metric">
+                        <span className="mono">{operation.callCount}</span>
+                        <span className="mono">{operation.p95Ms.toFixed(0)}ms</span>
+                      </div>
+                    </Link>
+                  )) : (
+                    <div className="table-row">
+                      <div className="row-name"><span>No operation data yet.</span></div>
+                    </div>
+                  )}
+                </div>
+              </article>
+
               <article className="dash-card table-card">
                 <div className="table-head">
                   <p><i className="ti ti-devices" /> Top Clients</p>

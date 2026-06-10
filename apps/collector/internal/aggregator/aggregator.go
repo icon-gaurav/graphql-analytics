@@ -85,6 +85,8 @@ func processEvent(state *aggregateState, event intake.OperationEvent) {
 		Timestamp:       time.UnixMilli(event.Timestamp),
 		OperationName:   operationName,
 		OperationType:   event.OperationType,
+		OperationQuery:  event.OperationQuery,
+		RequestHeaders:  event.RequestHeaders,
 		DurationMs:      event.DurationMs,
 		HasErrors:       event.HasErrors,
 		ClientName:      event.ClientName,
