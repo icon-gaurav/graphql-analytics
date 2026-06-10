@@ -180,8 +180,8 @@ GraphQLAnalyticsPlugin({
 Environment variables:
 
 ```
-COLLECTOR_PORT=9000
-DB_WRITE_URL=postgres://user:pass@host/dbname
+COLLECTOR_UDP_PORT=9000
+COLLECTOR_DB_URL=postgres://user:pass@host/dbname
 FLUSH_INTERVAL_SECONDS=60
 BUCKET_CHANNEL_SIZE=10000
 ```
@@ -191,7 +191,7 @@ BUCKET_CHANNEL_SIZE=10000
 Environment variables:
 
 ```
-DB_READ_URL=postgres://user:pass@host/dbname
+COLLECTOR_DB_URL=postgres://user:pass@host/dbname
 SCHEMA_SDL_PATH=/path/to/schema.graphql
 NODE_ENV=production
 ```

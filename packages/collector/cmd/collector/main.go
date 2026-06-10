@@ -16,7 +16,10 @@ import (
 
 func main() {
 	// Load configuration from env
-	collectorPort := os.Getenv("COLLECTOR_PORT")
+	collectorPort := os.Getenv("COLLECTOR_UDP_PORT")
+	if collectorPort == "" {
+		collectorPort = os.Getenv("COLLECTOR_PORT")
+	}
 	if collectorPort == "" {
 		collectorPort = "9000"
 	}
@@ -29,9 +32,12 @@ func main() {
 		otlpEnabled = "true"
 	}
 
-	dbWriteURL := os.Getenv("DB_WRITE_URL")
+	dbWriteURL := os.Getenv("COLLECTOR_DB_URL")
 	if dbWriteURL == "" {
-		log.Fatal("DB_WRITE_URL environment variable must be set")
+		dbWriteURL = os.Getenv("DB_WRITE_URL")
+	}
+	if dbWriteURL == "" {
+		log.Fatal("COLLECTOR_DB_URL environment variable must be set")
 	}
 
 	// Start UDP intake listener

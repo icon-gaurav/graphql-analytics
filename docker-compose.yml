@@ -6,6 +6,11 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: password
       PGTZ: UTC
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    command: >
+      postgres
+      -c listen_addresses=*
+      -c password_encryption=scram-sha-256
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - timescale_data:/var/lib/postgresql/data
@@ -23,10 +28,10 @@ services:
       context: ./packages/collector
       dockerfile: Dockerfile
     environment:
-      COLLECTOR_PORT: 9000
+      COLLECTOR_UDP_PORT: 9000
       OTLP_ENABLED: "true"
       OTLP_HTTP_PORT: "4318"
-      DB_WRITE_URL: postgres://collector_user:password@timescaledb:5432/graphql_analytics?sslmode=disable
+      COLLECTOR_DB_URL: postgres://collector_user:password@timescaledb:5432/graphql_analytics?sslmode=disable
       FLUSH_INTERVAL_SECONDS: 60
       BUCKET_CHANNEL_SIZE: 10000
     ports:
@@ -44,7 +49,7 @@ services:
       dockerfile: apps/dashboard/Dockerfile
     environment:
       NODE_ENV: production
-      DB_READ_URL: postgres://displayer_user:password@timescaledb:5432/graphql_analytics?sslmode=disable
+      COLLECTOR_DB_URL: postgres://displayer_user:password@timescaledb:5432/graphql_analytics?sslmode=disable
       SCHEMA_SDL_PATH: /schema/schema.graphql
     ports:
       - "3000:3000"

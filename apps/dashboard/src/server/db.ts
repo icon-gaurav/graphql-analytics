@@ -5,9 +5,9 @@ let pool: Sql | null = null;
 
 export function getDB(): Sql {
   if (!pool) {
-    const dbUrl = process.env.DB_READ_URL;
+    const dbUrl = process.env.COLLECTOR_DB_URL;
     if (!dbUrl) {
-      throw new Error('DB_READ_URL environment variable is required');
+      throw new Error('COLLECTOR_DB_URL environment variable is required');
     }
 
     pool = postgres(dbUrl, {
