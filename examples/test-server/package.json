@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@apollo/server": "^4.10.0",
-    "@graphql-analytics/sdk": "file:../../packages/sdk",
+    "@graphql-analytics/sdk-apollo": "file:../../packages/sdk-apollo",
     "graphql": "^16.8.1",
     "graphql-tag": "^2.12.6"
   },

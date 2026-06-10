@@ -1,7 +1,7 @@
 import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { gql } from 'graphql-tag';
-import { GraphQLAnalyticsPlugin } from '@graphql-analytics/sdk';
+import { GraphQLAnalyticsPlugin } from '@graphql-analytics/sdk-apollo';
 
 // Sample GraphQL schema
 const typeDefs = gql`

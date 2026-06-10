@@ -1,0 +1,25 @@
+{
+  "name": "@graphql-analytics/sdk-apollo",
+  "version": "1.0.0",
+  "description": "Apollo integration for GraphQL Analytics SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@graphql-analytics/sdk-core": "file:../sdk-core"
+  },
+  "peerDependencies": {
+    "graphql": "^15.0.0 || ^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

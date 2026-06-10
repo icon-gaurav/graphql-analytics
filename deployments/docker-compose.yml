@@ -12,7 +12,7 @@ services:
       -c listen_addresses=*
       -c password_encryption=scram-sha-256
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../schemas/init.sql:/docker-entrypoint-initdb.d/init.sql
       - timescale_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
@@ -25,7 +25,7 @@ services:
 
   collector:
     build:
-      context: ./packages/collector
+      context: ../apps/collector
       dockerfile: Dockerfile
     environment:
       OTLP_HTTP_PORT: "4318"
@@ -42,7 +42,7 @@ services:
 
   dashboard:
     build:
-      context: .
+      context: ..
       dockerfile: apps/dashboard/Dockerfile
     environment:
       NODE_ENV: production
@@ -56,7 +56,7 @@ services:
       collector:
         condition: service_started
     volumes:
-      - ./schema.graphql:/schema/schema.graphql:ro
+      - ../schemas/schema.graphql:/schema/schema.graphql:ro
     restart: unless-stopped
 
 volumes:

@@ -5,12 +5,14 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "examples/*"
   ],
   "scripts": {
-    "build": "npm run build:collector && npm run build --workspace=packages/sdk && npm run build --workspace=apps/dashboard && npm run build --workspace=apps/test-server",
-    "build:collector": "cd packages/collector && go build ./...",
-    "dev": "concurrently \"npm run dev --workspace=packages/sdk\" \"npm run dev --workspace=packages/collector\" \"npm run dev --workspace=apps/dashboard\"",
+    "build": "npm run build:collector && npm run build --workspace=packages/sdk-core && npm run build --workspace=packages/sdk-apollo && npm run build --workspace=packages/sdk-express && npm run build --workspace=packages/sdk-fastify && npm run build --workspace=apps/dashboard && npm run build --workspace=examples/test-server",
+    "build:collector": "cd apps/collector && go build ./...",
+    "dev": "concurrently \"npm run dev --workspace=packages/sdk-core\" \"npm run dev:collector\" \"npm run dev --workspace=apps/dashboard\"",
+    "dev:collector": "cd apps/collector && go run ./cmd/collector",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces"
   },

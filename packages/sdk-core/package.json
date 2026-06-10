@@ -1,5 +1,5 @@
 {
-  "name": "@graphql-analytics/sdk",
+  "name": "@graphql-analytics/sdk-core",
   "version": "1.0.0",
   "description": "SDK for integrating GraphQL Analytics with Apollo Server and GraphQL Yoga",
   "main": "dist/index.js",
