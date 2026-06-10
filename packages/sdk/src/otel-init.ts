@@ -1,7 +1,9 @@
 import { metrics } from '@opentelemetry/api';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { BatchSpanProcessor, NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 
 export interface OTelConfig {
@@ -34,11 +36,16 @@ export function initializeOTel(
   }
 
   try {
+    const resource = resourceFromAttributes({
+      [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+    });
+
     const traceExporter = new OTLPTraceExporter({
       url: `${collectorUrl}/v1/traces`,
     });
 
     tracerProviderInstance = new NodeTracerProvider({
+      resource,
       spanProcessors: [new BatchSpanProcessor(traceExporter)],
     });
     tracerProviderInstance.register();
@@ -53,6 +60,7 @@ export function initializeOTel(
     });
 
     meterProviderInstance = new MeterProvider({
+      resource,
       readers: [metricReader],
     });
     metrics.setGlobalMeterProvider(meterProviderInstance);

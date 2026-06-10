@@ -28,23 +28,13 @@ export {
 } from './otel-metrics';
 export type { OTelMetricsConfig } from './otel-metrics';
 
-// Legacy exports (kept for backward compatibility)
-export { RingBuffer } from './buffer';
-export type {
-  BufferEvent,
-  FieldUsage,
-  ResolverTiming,
-  RingBufferOptions,
-} from './buffer';
-
+// Plugin exports
 export { GraphQLAnalyticsPlugin } from './plugin';
 export type { GraphQLAnalyticsPluginOptions } from './plugin';
 
 export { useGraphQLAnalytics } from './yoga';
 export type { GraphQLAnalyticsYogaOptions } from './yoga';
 
-export { UDPTransport } from './transport';
-export type { TransportOptions } from './transport';
 
 export type {
   OperationEvent,

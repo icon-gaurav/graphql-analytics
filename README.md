@@ -8,7 +8,7 @@
 - **Resolver latency breakdown** — Monitor p50, p95, p99 latency per resolver
 - **Error rate monitoring** — Track errors over time
 - **Unused field detection** — Identify deprecated fields that are safe to remove
-- **Fire-and-forget SDK** — Never blocks your GraphQL response path
+- **OpenTelemetry-native** — Traces and metrics via OTLP, never blocks GraphQL execution
 - **Simple integration** — 3 lines of code to add to Apollo Server or GraphQL Yoga
 
 ## 🏗️ Architecture
@@ -54,8 +54,7 @@ docker-compose up
 
 # Services will be available at:
 # - Dashboard: http://localhost:3000
-# - Collector: localhost:9000/udp
-# - Metrics: http://localhost:9001/metrics
+# - OTel Collector: localhost:4318
 ```
 
 ### Integration with Apollo Server
@@ -68,8 +67,8 @@ const server = new ApolloServer({
   resolvers,
   plugins: [
     GraphQLAnalyticsPlugin({
-      host: 'localhost', // collector host
-      port: 9000,        // collector port
+      collectorUrl: 'http://localhost:4318', // OpenTelemetry Collector URL
+      serviceName: 'my-graphql-api',
     })
   ]
 })
@@ -86,8 +85,8 @@ const yoga = createYoga({
   schema,
   plugins: [
     useGraphQLAnalytics({
-      host: 'localhost',
-      port: 9000,
+      collectorUrl: 'http://localhost:4318',
+      serviceName: 'my-graphql-api',
     })
   ]
 })
@@ -100,28 +99,30 @@ graphql-analytics/
 ├── packages/
 │   ├── sdk/              # TypeScript SDK (npm package)
 │   │   ├── src/
-│   │   │   ├── buffer.ts       # Ring buffer with async flush
-│   │   │   ├── transport.ts    # UDP sender (fire-and-forget)
-│   │   │   ├── plugin.ts       # Apollo Server plugin
-│   │   │   ├── yoga.ts         # GraphQL Yoga middleware
-│   │   │   └── schema.ts       # Payload types
+│   │   │   ├── plugin.ts              # Apollo Server plugin
+│   │   │   ├── yoga.ts                # GraphQL Yoga middleware
+│   │   │   ├── otel-init.ts           # OpenTelemetry initialization
+│   │   │   ├── otel-tracing.ts        # Trace instrumentation
+│   │   │   ├── otel-metrics.ts        # Metrics instrumentation
+│   │   │   ├── query-metrics.ts       # Query complexity calculation
+│   │   │   └── schema.ts              # Shared types
 │   │   └── package.json
 │   │
 │   └── collector/       # Go service
 │       ├── cmd/collector/
 │       ├── internal/
-│       │   ├── intake/         # UDP listener
+│       │   ├── intake/         # OTLP receiver
 │       │   ├── aggregator/     # 1-min bucket aggregation
 │       │   └── writer/         # TimescaleDB writer
 │       └── go.mod
 │
 ├── apps/
-│   └── displayer/       # Next.js dashboard
+│   └── dashboard/       # Next.js dashboard
 │       ├── src/
 │       │   ├── server/
 │       │   │   ├── routers/    # tRPC endpoints
 │       │   │   └── db.ts       # Database client
-│       │   └── pages/          # UI pages
+│       │   └── app/            # UI pages
 │       └── package.json
 │
 ├── docker-compose.yml
@@ -167,11 +168,10 @@ This will start:
 
 ```typescript
 GraphQLAnalyticsPlugin({
-  host: 'localhost',              // Collector host
-  port: 9000,                     // Collector UDP port
-  bufferCapacity: 1000,           // Max events in memory
-  bufferFlushIntervalMs: 2000,    // Flush every 2 seconds
-  bufferFlushThreshold: 100,      // Flush at 100 events
+  collectorUrl: 'http://localhost:4318',  // OpenTelemetry Collector HTTP endpoint
+  serviceName: 'my-graphql-api',          // Service name for traces/metrics
+  metricsIntervalMs: 30000,               // Metrics export interval (30s)
+  enabled: true,                          // Enable/disable telemetry
 })
 ```
 
@@ -180,7 +180,8 @@ GraphQLAnalyticsPlugin({
 Environment variables:
 
 ```
-COLLECTOR_UDP_PORT=9000
+OTEL_RECEIVER_ENABLED=true          # Enable OTLP receiver
+OTEL_RECEIVER_PORT=4318             # OTLP HTTP port
 COLLECTOR_DB_URL=postgres://user:pass@host/dbname
 FLUSH_INTERVAL_SECONDS=60
 BUCKET_CHANNEL_SIZE=10000
@@ -205,7 +206,7 @@ NODE_ENV=production
 
 ## 📈 Performance
 
-- **SDK overhead** — <1ms (fire-and-forget UDP)
+- **SDK overhead** — <5ms (async OpenTelemetry export, batched)
 - **Collector throughput** — ~100k events/sec per instance
 - **Dashboard queries** — <5s (statement timeout)
 - **Data freshness** — ~60s (aggregation interval)

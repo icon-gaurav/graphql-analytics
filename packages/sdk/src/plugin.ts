@@ -1,5 +1,4 @@
 import type { DocumentNode, GraphQLResolveInfo, OperationDefinitionNode } from 'graphql';
-import { RingBuffer, type BufferEvent } from './buffer';
 import { initializeOTel, type OTelConfig, shutdownOTel } from './otel-init';
 import {
   createOperationMetrics,
@@ -9,9 +8,13 @@ import {
 } from './otel-metrics';
 import { createFieldSpan, createOperationSpan, finishSpan, initializeTracing } from './otel-tracing';
 import { collectQueryMetrics } from './query-metrics';
-import { UDPTransport } from './transport';
 
 type OperationType = 'query' | 'mutation' | 'subscription';
+
+interface ResolverTiming {
+  path: string;
+  durationMs: number;
+}
 
 interface HeadersLike {
   get(name: string): string | null;
@@ -39,19 +42,11 @@ interface FieldResolverArgsLike {
 }
 
 export interface GraphQLAnalyticsPluginOptions extends OTelConfig {
-  host?: string;
-  port?: number;
-  batchSize?: number;
-  enableUdpFallback?: boolean;
-  bufferCapacity?: number;
-  flushIntervalMs?: number;
-  flushThreshold?: number;
+  // OTel configuration is inherited from OTelConfig
 }
 
 interface TelemetryRuntime {
   operationMetrics: ReturnType<typeof createOperationMetrics>;
-  udpTransport: UDPTransport | null;
-  udpBuffer: RingBuffer | null;
 }
 
 let runtime: TelemetryRuntime | null = null;
@@ -65,31 +60,8 @@ function initializeRuntime(options: GraphQLAnalyticsPluginOptions): TelemetryRun
   initializeTracing({ tracerName: 'graphql-apollo', tracerVersion: '1.0.0' });
   initializeMetrics({ meterName: 'graphql-apollo', meterVersion: '1.0.0' });
 
-  let udpTransport: UDPTransport | null = null;
-  let udpBuffer: RingBuffer | null = null;
-  const shouldEnableUdp = options.enableUdpFallback ?? Boolean(options.host && options.port);
-
-  if (shouldEnableUdp && options.host && options.port) {
-    udpTransport = new UDPTransport({
-      host: options.host,
-      port: options.port,
-      batchSize: options.batchSize,
-    });
-
-    udpBuffer = new RingBuffer({
-      capacity: options.bufferCapacity,
-      flushIntervalMs: options.flushIntervalMs,
-      flushThreshold: options.flushThreshold,
-      onFlush: (events) => {
-        udpTransport?.send(events);
-      },
-    });
-  }
-
   runtime = {
     operationMetrics: createOperationMetrics(),
-    udpTransport,
-    udpBuffer,
   };
 
   return runtime;
@@ -167,8 +139,8 @@ export function GraphQLAnalyticsPlugin(options: GraphQLAnalyticsPluginOptions = 
         complexityScore: queryMetrics.complexityScore,
       });
 
-      const fieldUsage = new Map<string, { typeName: string; fieldName: string }>();
-      const resolverTimings: BufferEvent['resolverTimings'] = [];
+       const fieldUsage = new Map<string, { typeName: string; fieldName: string }>();
+       const resolverTimings: ResolverTiming[] = [];
 
       return {
         async executionDidStart() {
@@ -230,20 +202,6 @@ export function GraphQLAnalyticsPlugin(options: GraphQLAnalyticsPluginOptions = 
               }
             );
 
-            telemetry.udpBuffer?.push({
-              operationName,
-              operationType,
-              fields: [...fieldUsage.values()],
-              durationMs,
-              resolverTimings,
-              clientName,
-              timestamp: Date.now(),
-              hasErrors,
-              queryDepth: queryMetrics.queryDepth,
-              fieldCount: queryMetrics.fieldCount,
-              complexityScore: queryMetrics.complexityScore,
-            });
-
             finishSpan(rootSpan, durationMs, { hasError: hasErrors });
           } catch {
             finishSpan(rootSpan, Date.now() - startTime, { hasError: true });
@@ -256,8 +214,6 @@ export function GraphQLAnalyticsPlugin(options: GraphQLAnalyticsPluginOptions = 
       return {
         async drainServer() {
           try {
-            await telemetry.udpBuffer?.shutdown();
-            telemetry.udpTransport?.close();
             await shutdownOTel();
           } catch {
             // SDK must not fail host shutdown.

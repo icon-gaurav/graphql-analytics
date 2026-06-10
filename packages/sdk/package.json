@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "latest",
+    "@opentelemetry/resources": "latest",
     "@opentelemetry/sdk-trace-node": "latest",
     "@opentelemetry/sdk-metrics": "latest",
     "@opentelemetry/exporter-trace-otlp-http": "latest",
