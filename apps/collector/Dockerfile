@@ -25,7 +25,7 @@ WORKDIR /app
 
 COPY --from=builder /app/collector .
 
-EXPOSE 9000/udp 9001
+EXPOSE 4318 9001
 
 CMD ["./collector"]
 

@@ -7,8 +7,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # Copy package.json files for workspaces
-COPY packages/sdk/package.json ./packages/sdk/
+COPY packages/sdk-core/package.json ./packages/sdk-core/
+COPY packages/sdk-apollo/package.json ./packages/sdk-apollo/
+COPY packages/sdk-express/package.json ./packages/sdk-express/
+COPY packages/sdk-fastify/package.json ./packages/sdk-fastify/
 COPY apps/dashboard/package.json ./apps/dashboard/
+COPY examples/test-server/package.json ./examples/test-server/
 
 # Install all workspace deps
 RUN npm ci --ignore-scripts
@@ -23,12 +27,16 @@ COPY --from=deps /app/package.json ./package.json
 COPY --from=deps /app/package-lock.json ./package-lock.json
 
 # Copy source
-COPY packages/sdk ./packages/sdk
+COPY packages/sdk-core ./packages/sdk-core
+COPY packages/sdk-apollo ./packages/sdk-apollo
+COPY packages/sdk-express ./packages/sdk-express
+COPY packages/sdk-fastify ./packages/sdk-fastify
 COPY apps/dashboard ./apps/dashboard
+COPY examples/test-server ./examples/test-server
 COPY tsconfig.json ./
 
 # Build SDK first
-RUN npm run build --workspace=packages/sdk
+RUN npm run build --workspace=packages/sdk-core
 
 # Build Next.js
 RUN npm run build --workspace=apps/dashboard

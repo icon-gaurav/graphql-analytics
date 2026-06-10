@@ -59,5 +59,21 @@ services:
       - ../schemas/schema.graphql:/schema/schema.graphql:ro
     restart: unless-stopped
 
+  test-server:
+    build:
+      context: ..
+      dockerfile: examples/test-server/Dockerfile
+    environment:
+      PORT: 4000
+      GRAPHQL_ANALYTICS_COLLECTOR_URL: http://collector:4318
+      GRAPHQL_ANALYTICS_METRICS_INTERVAL: 30000
+      GRAPHQL_ANALYTICS_ENABLED: "true"
+    ports:
+      - "4000:4000"
+    depends_on:
+      collector:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   timescale_data:

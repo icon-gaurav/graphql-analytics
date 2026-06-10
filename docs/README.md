@@ -50,17 +50,18 @@ cd graphql-analytics
 npm install
 
 # Start all services
-docker-compose up
+npm run dev:docker
 
 # Services will be available at:
 # - Dashboard: http://localhost:3000
 # - OTel Collector: localhost:4318
+# - Test GraphQL Server: http://localhost:4000
 ```
 
 ### Integration with Apollo Server
 
 ```typescript
-import { GraphQLAnalyticsPlugin } from '@graphql-analytics/sdk'
+import { GraphQLAnalyticsPlugin } from '@graphql-analytics/sdk-apollo'
 
 const server = new ApolloServer({
   typeDefs,
@@ -79,7 +80,7 @@ await server.start()
 ### Integration with GraphQL Yoga
 
 ```typescript
-import { useGraphQLAnalytics } from '@graphql-analytics/sdk'
+import { useGraphQLAnalytics } from '@graphql-analytics/sdk-core'
 
 const yoga = createYoga({
   schema,

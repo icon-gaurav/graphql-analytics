@@ -12,7 +12,11 @@
     "@graphql-analytics/sdk-core": "file:../sdk-core"
   },
   "peerDependencies": {
+    "@apollo/server": "^4.0.0",
     "graphql": "^15.0.0 || ^16.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@apollo/server": { "optional": false }
   },
   "devDependencies": {
     "@types/node": "^20.19.41",

@@ -1,8 +1,10 @@
 /**
- * @graphql-analytics/sdk
- * TypeScript SDK for integrating GraphQL Analytics with your GraphQL server.
- * 
- * Now powered by OpenTelemetry for standardized observability.
+ * @graphql-analytics/sdk-core
+ * Core OpenTelemetry instrumentation for GraphQL Analytics.
+ * Use the framework-specific packages for easier integration:
+ *   - @graphql-analytics/sdk-apollo  (Apollo Server)
+ *   - @graphql-analytics/sdk-express (Express + Apollo)
+ *   - @graphql-analytics/sdk-fastify (Fastify + Apollo/Mercurius)
  */
 
 // OpenTelemetry exports

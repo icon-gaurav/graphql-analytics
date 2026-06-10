@@ -13,6 +13,8 @@
     "build:collector": "cd apps/collector && go build ./...",
     "dev": "concurrently \"npm run dev --workspace=packages/sdk-core\" \"npm run dev:collector\" \"npm run dev --workspace=apps/dashboard\"",
     "dev:collector": "cd apps/collector && go run ./cmd/collector",
+    "dev:docker": "docker compose -f deployments/docker-compose.yml up --build",
+    "dev:docker:down": "docker compose -f deployments/docker-compose.yml down",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces"
   },
